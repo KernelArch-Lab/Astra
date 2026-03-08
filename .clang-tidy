@@ -1,0 +1,67 @@
+# ============================================================================
+# Astra Runtime .clang-tidy
+# Security-focused static analysis configuration
+# ============================================================================
+---
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -readability-magic-numbers,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay
+
+# Treat all enabled checks as errors in CI
+WarningsAsErrors: >
+  bugprone-*,
+  cert-*,
+  cppcoreguidelines-owning-memory,
+  cppcoreguidelines-no-malloc
+
+HeaderFilterRegex: 'include/astra/.*'
+
+CheckOptions:
+  # Ban raw new/delete - enforces smart pointer usage
+  - key: cppcoreguidelines-owning-memory.LegacyResourceConsumers
+    value: ''
+
+  # Naming conventions matching project standard
+  # m_ prefix for members, functions are camelCase
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.NamespaceCase
+    value: lower_case
+  - key: readability-identifier-naming.FunctionCase
+    value: camelCase
+  - key: readability-identifier-naming.VariableCase
+    value: camelCase
+  - key: readability-identifier-naming.ConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.EnumConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.MacroDefinitionPrefix
+    value: 'ASTRA_'
+
+  # Enforce include order
+  - key: misc-include-cleaner.IgnoreHeaders
+    value: ''
+
+  # Function size limits for readability
+  - key: readability-function-size.LineThreshold
+    value: '120'
+  - key: readability-function-size.StatementThreshold
+    value: '80'
+---

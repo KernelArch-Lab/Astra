@@ -1,0 +1,111 @@
+# ============================================================================
+# Astra Runtime .gitignore
+# ============================================================================
+
+# Build directories
+build/
+build_*/
+out/
+cmake-build-*/
+
+# Compiled objects
+*.o
+*.obj
+*.a
+*.so
+*.so.*
+*.dylib
+*.lib
+
+# Executables
+*.exe
+*.out
+astra_runtime
+astractl
+
+# Precompiled headers
+*.gch
+*.pch
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+*.cmake
+!cmake/**/*.cmake
+!CMakeLists.txt
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.cproject
+.settings/
+*.code-workspace
+.cache/
+
+# Sanitizer outputs
+*.asan
+*.msan
+*.tsan
+*.ubsan
+sanitizer_*.log
+
+# Fuzzing corpus and crashes
+tests/**/fuzz/corpus/
+tests/**/fuzz/crashes/
+tests/**/fuzz/artifacts/
+
+# Coverage
+*.gcda
+*.gcno
+*.gcov
+coverage/
+lcov.info
+
+# Profiling
+*.prof
+*.perf
+perf.data
+perf.data.old
+flamegraph*.svg
+
+# Core dumps
+core
+core.*
+vgcore.*
+
+# Dependency tracking
+.deps/
+.dirstamp
+
+# Third party build artifacts
+third_party/**/build/
+third_party/**/install/
+
+# AI pipeline
+ai_pipeline/**/*.onnx
+ai_pipeline/**/*.pt
+ai_pipeline/datasets/*.csv
+ai_pipeline/datasets/*.bin
+__pycache__/
+*.pyc
+
+# Documentation build output
+docs/_build/
+docs/html/
+docs/latex/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary
+*.tmp
+*.bak
+*.log

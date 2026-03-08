@@ -1,0 +1,84 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 28,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "debug",
+            "displayName": "Debug",
+            "description": "Debug build with assertions and sanitizer-friendly symbols",
+            "generator": "Unix Makefiles",
+            "binaryDir": "${sourceDir}/build/debug",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "ASTRA_ENABLE_TESTS": "ON",
+                "ASTRA_ENABLE_BENCHMARKS": "OFF"
+            }
+        },
+        {
+            "name": "release",
+            "displayName": "Release",
+            "description": "Optimised release build with hardening flags",
+            "generator": "Unix Makefiles",
+            "binaryDir": "${sourceDir}/build/release",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "ASTRA_ENABLE_TESTS": "OFF",
+                "ASTRA_ENABLE_BENCHMARKS": "ON"
+            }
+        },
+        {
+            "name": "sanitize",
+            "displayName": "Sanitizers (ASan + UBSan)",
+            "description": "Debug build with AddressSanitizer and UndefinedBehaviorSanitizer",
+            "generator": "Unix Makefiles",
+            "binaryDir": "${sourceDir}/build/sanitize",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "ASTRA_ENABLE_TESTS": "ON",
+                "ASTRA_ENABLE_SANITIZERS": "ON"
+            }
+        },
+        {
+            "name": "tsan",
+            "displayName": "ThreadSanitizer",
+            "description": "Debug build with ThreadSanitizer for data race detection",
+            "generator": "Unix Makefiles",
+            "binaryDir": "${sourceDir}/build/tsan",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "ASTRA_ENABLE_TESTS": "ON",
+                "ASTRA_ENABLE_TSAN": "ON"
+            }
+        },
+        {
+            "name": "msan",
+            "displayName": "MemorySanitizer",
+            "description": "Debug build with MemorySanitizer for uninitialised read detection",
+            "generator": "Unix Makefiles",
+            "binaryDir": "${sourceDir}/build/msan",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "ASTRA_ENABLE_TESTS": "ON",
+                "ASTRA_ENABLE_MSAN": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "debug",
+            "configurePreset": "debug"
+        },
+        {
+            "name": "release",
+            "configurePreset": "release"
+        },
+        {
+            "name": "sanitize",
+            "configurePreset": "sanitize"
+        }
+    ]
+}
