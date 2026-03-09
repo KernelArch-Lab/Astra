@@ -76,7 +76,7 @@ perf.data.old
 flamegraph*.svg
 
 # Core dumps
-core
+# core
 core.*
 vgcore.*
 
