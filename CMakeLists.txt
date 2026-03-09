@@ -14,7 +14,7 @@ project(
     AstraRuntime
     VERSION 0.1.0
     DESCRIPTION "Capability-based cybersecurity-hardened userspace runtime for Linux"
-    LANGUAGES C CXX ASM_NASM
+    LANGUAGES C CXX
 )
 
 # --------------------------------------------------------------------------

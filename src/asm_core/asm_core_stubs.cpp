@@ -83,7 +83,7 @@ extern "C" int asm_ct_compare(
 
     for (std::size_t lUIdx = 0; lUIdx < aULen; ++lUIdx)
     {
-        lUResult |= (lPByteLeft[lUIdx] ^ lPByteRight[lUIdx]);
+        lUResult |= static_cast<unsigned char>(lPByteLeft[lUIdx] ^ lPByteRight[lUIdx]);
     }
 
     COMPILER_BARRIER();

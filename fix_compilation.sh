@@ -1,3 +1,33 @@
+#!/bin/bash
+# ============================================================================
+# Astra Runtime - Compilation Fix Script
+# Run from the Astra project root: bash fix_compilation.sh
+#
+# Fixes 3 files:
+#   1. include/astra/common/log.h      - missing includes + trigraph
+#   2. src/asm_core/asm_core_stubs.cpp - conversion warning
+#   3. CMakeLists.txt                  - remove ASM_NASM requirement
+# ============================================================================
+
+set -e
+
+# Verify we are in the right directory
+if [ ! -f "src/main.cpp" ] || [ ! -d "include/astra" ]; then
+    echo "[!] ERROR: Run this script from the Astra project root."
+    echo "    cd ~/Desktop/Projects/Astra && bash fix_compilation.sh"
+    exit 1
+fi
+
+echo "[*] Applying compilation fixes..."
+echo ""
+
+# ==========================================================================
+# FIX 1: include/astra/common/log.h
+# Rewrites the entire file. This is safer than sed on macOS.
+# ==========================================================================
+echo "[1/3] Rewriting include/astra/common/log.h ..."
+
+cat > include/astra/common/log.h << 'LOGEOF'
 // ============================================================================
 // Astra Runtime - Logging Subsystem
 // include/astra/common/log.h
@@ -180,3 +210,41 @@ inline void write(
     astra::log::write(astra::log::Level::SEC_BREACH, module, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
 
 #endif // ASTRA_COMMON_LOG_H
+LOGEOF
+
+echo "  [OK] log.h rewritten (added cstdarg, cstdlib, fixed trigraph)"
+
+# ==========================================================================
+# FIX 2: src/asm_core/asm_core_stubs.cpp
+# Problem: implicit int-to-unsigned-char in XOR triggers -Wconversion
+# ==========================================================================
+echo "[2/3] Patching src/asm_core/asm_core_stubs.cpp ..."
+
+perl -i -pe 's/lUResult \|= \(lPByteLeft\[lUIdx\] \^ lPByteRight\[lUIdx\]\);/lUResult |= static_cast<unsigned char>(lPByteLeft[lUIdx] ^ lPByteRight[lUIdx]);/' src/asm_core/asm_core_stubs.cpp
+
+echo "  [OK] asm_core_stubs.cpp patched (static_cast on XOR result)"
+
+# ==========================================================================
+# FIX 3: CMakeLists.txt
+# Problem: ASM_NASM in LANGUAGES but no .asm files yet
+# ==========================================================================
+echo "[3/3] Patching CMakeLists.txt ..."
+
+perl -i -pe 's/LANGUAGES C CXX ASM_NASM/LANGUAGES C CXX/' CMakeLists.txt
+
+echo "  [OK] CMakeLists.txt patched (removed ASM_NASM)"
+
+# ==========================================================================
+# Summary
+# ==========================================================================
+echo ""
+echo "========================================="
+echo "[+] All 3 compilation fixes applied."
+echo "========================================="
+echo ""
+echo "Commit and push:"
+echo ""
+echo "  git add -A"
+echo '  git commit -m "Fix compilation: missing includes, conversion warning, remove NASM"'
+echo "  git push origin main"
+echo ""
