@@ -206,6 +206,20 @@ target_link_libraries(astra_runtime
 )
 
 # --------------------------------------------------------------------------
+# Demo executable - interactive demonstration of Core module (M-01)
+# Build and run:  ./build/astra_demo
+# --------------------------------------------------------------------------
+add_executable(astra_demo src/demo_main.cpp)
+
+target_link_libraries(astra_demo
+    PRIVATE
+        astra_core
+        astra_asm_core
+        pthread
+        dl
+)
+
+# --------------------------------------------------------------------------
 # Tests
 # --------------------------------------------------------------------------
 if(ASTRA_ENABLE_TESTS)
