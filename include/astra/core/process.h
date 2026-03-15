@@ -30,6 +30,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <sys/types.h>
 
 namespace astra
 {

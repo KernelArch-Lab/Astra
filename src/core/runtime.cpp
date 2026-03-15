@@ -228,8 +228,15 @@ Status Runtime::shutdown()
     // Securely wipe the root capability token
     asm_secure_wipe(&m_rootCapToken, sizeof(m_rootCapToken));
 
-    // Securely wipe the config (may contain sensitive instance info)
-    asm_secure_wipe(&m_config, sizeof(m_config));
+    // Clear config safely. Cannot asm_secure_wipe the entire struct
+    // because RuntimeConfig contains std::string (non-trivially destructible).
+    // Wiping over std::string internals is undefined behaviour.
+    m_config.m_szInstanceName.clear();
+    m_config.m_szInstanceName.shrink_to_fit();
+    m_config.m_uMaxServices = 0;
+    m_config.m_uMaxProcesses = 0;
+    m_config.m_uMaxCapabilities = 0;
+    m_config.m_uEventRingSize = 0;
 
     m_eState.store(RuntimeState::STOPPED, std::memory_order_release);
     ASTRA_LOG_INFO(LOG_TAG, "Runtime shutdown complete. State: STOPPED");

@@ -34,7 +34,13 @@ EventBus::EventBus()
     , m_uSequenceCounter(0)
     , m_bInitialised(false)
 {
-    std::memset(m_arrSubscribers, 0, sizeof(m_arrSubscribers));
+    for (U32 lUIdx = 0; lUIdx < MAX_SUBSCRIBERS; ++lUIdx)
+    {
+        m_arrSubscribers[lUIdx].m_eFilter = EventType::NONE;
+        m_arrSubscribers[lUIdx].m_handler = nullptr;
+        m_arrSubscribers[lUIdx].m_bActive = false;
+        std::memset(m_arrSubscribers[lUIdx].m_szName, 0, sizeof(m_arrSubscribers[lUIdx].m_szName));
+    }
 }
 
 EventBus::~EventBus()

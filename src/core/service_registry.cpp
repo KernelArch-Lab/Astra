@@ -108,10 +108,19 @@ void ServiceRegistry::shutdown()
     // Stop all running services in reverse registration order
     stopAll();
 
-    // Wipe and deallocate
+    // Securely wipe only the security-sensitive fields (capability tokens).
+    // We cannot asm_secure_wipe the entire ServiceSlot array because
+    // ServiceHandle contains std::string (non-trivially destructible).
+    // Wiping over std::string internals is undefined behaviour.
     if (m_pSlots != nullptr)
     {
-        asm_secure_wipe(m_pSlots, static_cast<size_t>(m_uMaxServices) * sizeof(ServiceSlot));
+        for (U32 lUIdx = 0; lUIdx < m_uMaxServices; ++lUIdx)
+        {
+            asm_secure_wipe(&m_pSlots[lUIdx].m_handle.m_capToken, sizeof(CapabilityToken));
+            m_pSlots[lUIdx].m_handle.m_szName.clear();
+            m_pSlots[lUIdx].m_handle.m_szName.shrink_to_fit();
+            m_pSlots[lUIdx].m_pService = nullptr;
+        }
         delete[] m_pSlots;
         m_pSlots = nullptr;
     }
