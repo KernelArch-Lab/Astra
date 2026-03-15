@@ -194,9 +194,8 @@ int main(int aIArgc, char* aArrArgv[])
     // -----------------------------------------------------------------
     // Step 3: Build runtime configuration
     // -----------------------------------------------------------------
-    astra::core::RuntimeConfig lConfig;
+    astra::core::RuntimeConfig lConfig = astra::core::RuntimeConfig::defaultConfig();
     lConfig.m_szInstanceName     = lCmdArgs.m_szInstanceName;
-    lConfig.m_uMaxServices       = 64;
     lConfig.m_bEnableSecurityLog = true;
     lConfig.m_bVerbose           = lCmdArgs.m_bVerbose;
 
