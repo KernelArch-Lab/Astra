@@ -29,6 +29,7 @@
 
 #include <atomic>
 #include <string>
+#include <astra/core/ipc/ipc_router.h>
 
 namespace astra
 {
@@ -155,6 +156,7 @@ private:
     ServiceRegistry             m_serviceRegistry;
     EventBus                    m_eventBus;
     ProcessManager              m_processManager;
+    astra::ipc::IpcRouter       m_ipcRouter;
 
     // Root capability token
     CapabilityToken             m_rootCapToken;

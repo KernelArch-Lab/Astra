@@ -17,7 +17,7 @@
 #include <thread>
 #include <chrono>
 
-static const char* LOG_TAG = "demo_svc";
+[[maybe_unused]] static const char* LOG_TAG = "demo_svc";
 
 // ---- Global Logger for Demo Service ----
 // This logger writes to logs/demo.log. Initialise in DemoService::onStart().
@@ -33,7 +33,7 @@ static const char* COL_YELLOW  = "\033[33m";
 static const char* COL_BLUE    = "\033[34m";
 static const char* COL_MAGENTA = "\033[35m";
 static const char* COL_CYAN    = "\033[36m";
-static const char* COL_WHITE   = "\033[37m";
+[[maybe_unused]] static const char* COL_WHITE   = "\033[37m";
 
 namespace astra
 {

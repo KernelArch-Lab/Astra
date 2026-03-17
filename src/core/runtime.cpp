@@ -19,6 +19,8 @@
 
 #include <astra/core/runtime.h>
 #include <astra/core/logger.h>
+#include <astra/core/ipc/ipc_logger.h>
+#include <astra/core/ipc/ipc_engine.h>
 #include <astra/asm_core/asm_core.h>
 #include <astra/common/log.h>
 #include <astra/common/version.h>
@@ -138,12 +140,31 @@ Status Runtime::init(const RuntimeConfig& aConfig)
     lStatus = initProcessManager();
     if (!lStatus.has_value())
     {
-        m_serviceRegistry.shutdown();
+        m_ipcRouter.destroyAll(); // M-03: close all channels, wipe session keys
+    m_serviceRegistry.shutdown();
         m_eventBus.shutdown();
         m_capabilityManager.shutdown();
         m_eState.store(RuntimeState::FAILED, std::memory_order_release);
         return lStatus;
     }
+
+    // Stage 7: IPC Router (M-03)
+    g_logIpc.initialise("ipc", "logs/ipc.log");
+    // IpcRouter owns no resources at construction — channels are created
+    // on demand via createChannel(). Nothing to fail here.
+    ASTRA_LOG_INFO(LOG_TAG, "Stage 7/7: IPC Router ready");
+
+    // Wire CAPABILITY_REVOKED → IpcRouter so revoked tokens immediately
+    // tear down all channels derived from them
+    m_eventBus.subscribe(
+        EventType::CAPABILITY_REVOKED,
+        [this](const Event& aEvent) {
+            m_ipcRouter.onCapabilityRevoked(
+                aEvent.m_payload.m_capability.m_uTokenIdHigh,
+                aEvent.m_payload.m_capability.m_uTokenIdLow);
+        },
+        "ipc_revocation_handler"
+    );
 
     // Publish RUNTIME_RUNNING event
     m_eventBus.publishEvent(
