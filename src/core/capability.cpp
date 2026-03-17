@@ -4,6 +4,7 @@
 // ============================================================================
 
 #include <astra/core/capability.h>
+#include <astra/core/logger.h>
 #include <astra/asm_core/asm_core.h>
 #include <astra/common/log.h>
 
@@ -12,6 +13,11 @@
 #include <thread>
 
 static const char* LOG_TAG = "capability";
+
+// ---- Global Logger for Capability Manager ----
+// This logger writes to logs/capability.log. Initialise in CapabilityManager::init().
+// Usage: LOG_INFO(g_logCapability, "Token " << uTokenId << " created");
+ASTRA_DEFINE_LOGGER(g_logCapability);
 
 namespace astra
 {

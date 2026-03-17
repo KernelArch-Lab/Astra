@@ -18,6 +18,7 @@
 // ============================================================================
 
 #include <astra/core/runtime.h>
+#include <astra/core/logger.h>
 #include <astra/asm_core/asm_core.h>
 #include <astra/common/log.h>
 #include <astra/common/version.h>
@@ -27,6 +28,11 @@
 #include <thread>
 
 static const char* LOG_TAG = "core";
+
+// ---- Global Logger for Core Runtime (M-01) ----
+// This logger writes to logs/core.log. Initialise it in Runtime::init().
+// Usage: LOG_INFO(g_logCore, "message " << variable);
+ASTRA_DEFINE_LOGGER(g_logCore);
 
 namespace astra
 {

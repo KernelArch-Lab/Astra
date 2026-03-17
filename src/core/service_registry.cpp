@@ -4,6 +4,7 @@
 // ============================================================================
 
 #include <astra/core/service.h>
+#include <astra/core/logger.h>
 #include <astra/asm_core/asm_core.h>
 #include <astra/common/log.h>
 
@@ -12,6 +13,11 @@
 #include <thread>
 
 static const char* LOG_TAG = "svc_registry";
+
+// ---- Global Logger for Service Registry ----
+// This logger writes to logs/svc_registry.log. Initialise in ServiceRegistry::init().
+// Usage: LOG_INFO(g_logSvcRegistry, "Service " << szName << " registered");
+ASTRA_DEFINE_LOGGER(g_logSvcRegistry);
 
 namespace astra
 {

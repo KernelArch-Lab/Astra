@@ -11,6 +11,7 @@
 
 #include <astra/core/runtime.h>
 #include <astra/core/demo_service.h>
+#include <astra/core/logger.h>
 #include <astra/common/log.h>
 #include <astra/common/version.h>
 
@@ -19,6 +20,11 @@
 #include <string>
 
 static const char* LOG_TAG = "demo";
+
+// ---- Global Logger for demo entry point ----
+// This logger writes to logs/demo_main.log.
+// Usage: LOG_INFO(g_logDemoMain, "Demo starting");
+ASTRA_DEFINE_LOGGER(g_logDemoMain);
 
 int main(int aIArgc, char* aArrArgv[])
 {

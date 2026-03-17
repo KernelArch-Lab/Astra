@@ -11,6 +11,7 @@
 
 #include <astra/core/process.h>
 #include <astra/core/event_bus.h>
+#include <astra/core/logger.h>
 #include <astra/asm_core/asm_core.h>
 #include <astra/common/log.h>
 
@@ -19,6 +20,11 @@
 #include <thread>
 
 static const char* LOG_TAG = "proc_mgr";
+
+// ---- Global Logger for Process Manager ----
+// This logger writes to logs/proc_mgr.log. Initialise in ProcessManager::init().
+// Usage: LOG_INFO(g_logProcMgr, "Process " << uPid << " spawned");
+ASTRA_DEFINE_LOGGER(g_logProcMgr);
 
 namespace astra
 {

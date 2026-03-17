@@ -4,6 +4,7 @@
 // ============================================================================
 
 #include <astra/core/event_bus.h>
+#include <astra/core/logger.h>
 #include <astra/asm_core/asm_core.h>
 #include <astra/common/log.h>
 
@@ -12,6 +13,11 @@
 #include <new>
 
 static const char* LOG_TAG = "event_bus";
+
+// ---- Global Logger for Event Bus ----
+// This logger writes to logs/event_bus.log. Initialise in EventBus::init().
+// Usage: LOG_INFO(g_logEventBus, "Event " << uType << " published");
+ASTRA_DEFINE_LOGGER(g_logEventBus);
 
 namespace astra
 {

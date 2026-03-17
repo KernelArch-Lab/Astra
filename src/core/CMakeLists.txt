@@ -16,6 +16,7 @@ set(CORE_SOURCES
     event_bus.cpp
     process_manager.cpp
     demo_service.cpp
+    logger.cpp
 )
 
 add_library(astra_core STATIC ${CORE_SOURCES})

@@ -8,6 +8,7 @@
 
 #include <astra/core/demo_service.h>
 #include <astra/core/runtime.h>
+#include <astra/core/logger.h>
 #include <astra/common/log.h>
 
 #include <cstdarg>
@@ -17,6 +18,11 @@
 #include <chrono>
 
 static const char* LOG_TAG = "demo_svc";
+
+// ---- Global Logger for Demo Service ----
+// This logger writes to logs/demo.log. Initialise in DemoService::onStart().
+// Usage: LOG_INFO(g_logDemo, "Demo step " << uStep << " completed");
+ASTRA_DEFINE_LOGGER(g_logDemo);
 
 // ANSI colour codes for terminal output
 static const char* COL_RESET   = "\033[0m";
