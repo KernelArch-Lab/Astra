@@ -1,5 +1,5 @@
 #include <astra/core/ipc/ipc_channel.h>
-#include <astra/core/ipc/ipc_logger.h>
+#include <astra/core/logger.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -32,7 +32,7 @@ static IpcSlot* slotsPtr(IpcRingBuffer* r) noexcept {
 
 bool IpcChannel::init(uint32_t cap, const char* shmName) noexcept {
     if (!cap || (cap & (cap - 1))) {
-        IPC_ERROR("Ring capacity must be power-of-two, got " << cap);
+        LOG_ERROR(g_logIpc, "Ring capacity must be power-of-two, got " << cap);
         return false;
     }
     size_t total = ringBytes(cap);
@@ -41,17 +41,17 @@ bool IpcChannel::init(uint32_t cap, const char* shmName) noexcept {
         shm_unlink(m_szShmName);
         m_iShmFd = shm_open(m_szShmName, O_CREAT | O_RDWR, 0600);
         if (m_iShmFd < 0) {
-            IPC_ERROR("shm_open failed: " << strerror(errno));
+            LOG_ERROR(g_logIpc, "shm_open failed: " << strerror(errno));
             return false;
         }
         if (ftruncate(m_iShmFd, static_cast<off_t>(total)) < 0) {
-            IPC_ERROR("ftruncate failed: " << strerror(errno));
+            LOG_ERROR(g_logIpc, "ftruncate failed: " << strerror(errno));
             close(m_iShmFd); m_iShmFd = -1; return false;
         }
         void* a = mmap(nullptr, total, PROT_READ|PROT_WRITE,
                        MAP_SHARED, m_iShmFd, 0);
         if (a == MAP_FAILED) {
-            IPC_ERROR("mmap failed: " << strerror(errno));
+            LOG_ERROR(g_logIpc, "mmap failed: " << strerror(errno));
             close(m_iShmFd); m_iShmFd = -1; return false;
         }
         m_pRing = new(a) IpcRingBuffer{};
@@ -59,7 +59,7 @@ bool IpcChannel::init(uint32_t cap, const char* shmName) noexcept {
     } else {
         void* a = nullptr;
         if (posix_memalign(&a, 64, total)) {
-            IPC_ERROR("posix_memalign failed");
+            LOG_ERROR(g_logIpc, "posix_memalign failed");
             return false;
         }
         memset(a, 0, total);
@@ -72,7 +72,7 @@ bool IpcChannel::init(uint32_t cap, const char* shmName) noexcept {
     m_pRing->meta.m_uMask     = cap - 1;
     m_uMappedSize = total;
     m_bReady = true;
-    IPC_INFO("Ring init OK  name=" << (shmName ? m_szShmName : "(heap)")
+    LOG_INFO(g_logIpc, "Ring init OK  name=" << (shmName ? m_szShmName : "(heap)")
              << "  cap=" << cap << "  bytes=" << total);
     return true;
 }
@@ -85,7 +85,7 @@ bool IpcChannel::attachShm(const char* shmName) noexcept {
         usleep(10'000);
     }
     if (m_iShmFd < 0) {
-        IPC_ERROR("attachShm open '" << m_szShmName << "': " << strerror(errno));
+        LOG_ERROR(g_logIpc, "attachShm open '" << m_szShmName << "': " << strerror(errno));
         return false;
     }
     void* hdr = mmap(nullptr, sizeof(IpcRingBuffer), PROT_READ,
@@ -96,7 +96,7 @@ bool IpcChannel::attachShm(const char* shmName) noexcept {
     uint32_t cap = reinterpret_cast<IpcRingBuffer*>(hdr)->meta.m_uCapacity;
     munmap(hdr, sizeof(IpcRingBuffer));
     if (!cap || (cap & (cap - 1))) {
-        IPC_ERROR("Bad capacity " << cap << " in shm header");
+        LOG_ERROR(g_logIpc, "Bad capacity " << cap << " in shm header");
         close(m_iShmFd); m_iShmFd = -1; return false;
     }
     size_t total = ringBytes(cap);
@@ -110,7 +110,7 @@ bool IpcChannel::attachShm(const char* shmName) noexcept {
     m_uMappedSize = total;
     m_bOwnsShm = false;
     m_bReady = true;
-    IPC_INFO("Child attached '" << m_szShmName << "'  cap=" << cap);
+    LOG_INFO(g_logIpc, "Child attached '" << m_szShmName << "'  cap=" << cap);
     return true;
 }
 
@@ -128,7 +128,7 @@ IpcChannel::~IpcChannel() {
 bool IpcChannel::deriveSessionKey(const astra::core::CapabilityToken& tok,
                                    const char* ch) noexcept {
     if (!tok.isValid()) {
-        IPC_ERROR("deriveSessionKey: invalid token for channel '" << ch << "'");
+        LOG_ERROR(g_logIpc, "deriveSessionKey: invalid token for channel '" << ch << "'");
         return false;
     }
     uint8_t ki[32]{};
@@ -139,7 +139,7 @@ bool IpcChannel::deriveSessionKey(const astra::core::CapabilityToken& tok,
     blake3_hasher_finalize(&h, m_aSessionKey, 32);
     secureWipe(ki, 32);
     m_bKeyDerived = true;
-    IPC_DEBUG("Session key derived for channel '" << ch << "'");
+    LOG_DEBUG(g_logIpc, "Session key derived for channel '" << ch << "'");
     return true;
 }
 
@@ -221,9 +221,9 @@ RecvResult IpcChannel::recv(uint8_t* out, size_t maxLen,
 
 void IpcChannel::notifyAnomaly(uint64_t seq, RecvResult r) noexcept {
     if (r == RecvResult::AUTH_FAIL)
-        IPC_WARN("AUTH_FAIL on seq=" << seq << " — notifying M-09");
+        LOG_WARN(g_logIpc, "AUTH_FAIL on seq=" << seq << " — notifying M-09");
     else
-        IPC_WARN("REPLAY_DETECTED on seq=" << seq);
+        LOG_WARN(g_logIpc, "REPLAY_DETECTED on seq=" << seq);
 }
 void IpcChannel::wipeSessionKey() noexcept {
     secureWipe(m_aSessionKey, 32); m_bKeyDerived = false;

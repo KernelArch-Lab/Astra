@@ -2,7 +2,7 @@
 #include <astra/core/service.h>
 #include <astra/common/types.h>
 #include <astra/core/ipc/ipc_router.h>
-#include <astra/core/ipc/ipc_logger.h>
+#include <astra/core/logger.h>
 #include <thread>
 #include <atomic>
 

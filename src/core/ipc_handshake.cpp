@@ -1,5 +1,6 @@
 #include <astra/core/ipc/ipc_handshake.h>
-#include <astra/core/ipc/ipc_logger.h>
+#include <astra/core/logger.h>
+ASTRA_DECLARE_LOGGER(g_logIpc);
 #include <cstdio>
 #include <cstring>
 #include <unistd.h>
@@ -126,16 +127,16 @@ HandshakeResult HandshakeEngine::runInitiator(
     randomBytes(pkt.m_aChallenge, 32);
     bootstrapTag(pkt);
     if (!ctrlSend(pkt)) return HandshakeResult::ERR_NO_MEMORY;
-    IPC_DEBUG("Initiator sent CAP for channel " << channelId);
+    LOG_DEBUG(g_logIpc, "Initiator sent CAP for channel " << channelId);
 
     HandshakePacket resp{};
     if (!ctrlRecv(resp, timeoutUs)) {
-        IPC_WARN("Initiator timeout waiting VRF|CAP on channel " << channelId);
+        LOG_WARN(g_logIpc, "Initiator timeout waiting VRF|CAP on channel " << channelId);
         return HandshakeResult::ERR_TIMEOUT;
     }
     if (resp.m_eFlags & FLAG_RST) return HandshakeResult::ERR_RST_RECEIVED;
     if ((resp.m_eFlags & (FLAG_VRF|FLAG_CAP)) != (FLAG_VRF|FLAG_CAP)) {
-        IPC_ERROR("Initiator: bad flags 0x" << std::hex << static_cast<int>(resp.m_eFlags));
+        LOG_ERROR(g_logIpc, "Initiator: bad flags 0x" << std::hex << static_cast<int>(resp.m_eFlags));
         return HandshakeResult::ERR_BAD_FLAGS;
     }
     if (resp.m_uVersion != IPC_PROTOCOL_VERSION)
@@ -144,12 +145,12 @@ HandshakeResult HandshakeEngine::runInitiator(
     uint8_t expectedA[32];
     keyedResponse(sessionKey, pkt.m_aChallenge, expectedA);
     if (!ctCompare(expectedA, resp.m_aResponse, 32)) {
-        IPC_ERROR("Initiator: key mismatch on response_A channel " << channelId);
+        LOG_ERROR(g_logIpc, "Initiator: key mismatch on response_A channel " << channelId);
         return HandshakeResult::ERR_KEY_MISMATCH;
     }
     uint8_t challengeB[32];
     memcpy(challengeB, resp.m_aChallenge, 32);
-    IPC_DEBUG("Initiator: VRF|CAP verified on channel " << channelId);
+    LOG_DEBUG(g_logIpc, "Initiator: VRF|CAP verified on channel " << channelId);
 
     HandshakePacket ack{};
     ack.m_eFlags = FLAG_ACK | FLAG_CHK; ack.m_uVersion = IPC_PROTOCOL_VERSION;
@@ -159,21 +160,21 @@ HandshakeResult HandshakeEngine::runInitiator(
     memcpy(ack.m_aChallenge, &channelId, 4);
     tagPacket(sessionKey, ack);
     if (!ctrlSend(ack)) return HandshakeResult::ERR_NO_MEMORY;
-    IPC_DEBUG("Initiator sent ACK|CHK for channel " << channelId);
+    LOG_DEBUG(g_logIpc, "Initiator sent ACK|CHK for channel " << channelId);
 
     HandshakePacket rdy{};
     if (!ctrlRecv(rdy, timeoutUs)) {
-        IPC_WARN("Initiator timeout waiting RDY on channel " << channelId);
+        LOG_WARN(g_logIpc, "Initiator timeout waiting RDY on channel " << channelId);
         return HandshakeResult::ERR_TIMEOUT;
     }
     if (rdy.m_eFlags & FLAG_RST)    return HandshakeResult::ERR_RST_RECEIVED;
     if (!(rdy.m_eFlags & FLAG_RDY)) return HandshakeResult::ERR_BAD_FLAGS;
     if (!verifyPacketTag(sessionKey, rdy)) {
-        IPC_ERROR("Initiator: RDY tag invalid on channel " << channelId);
+        LOG_ERROR(g_logIpc, "Initiator: RDY tag invalid on channel " << channelId);
         return HandshakeResult::ERR_AUTH_FAIL;
     }
     m_bEstablished = true;
-    IPC_INFO("Initiator ESTABLISHED channel " << channelId);
+    LOG_INFO(g_logIpc, "Initiator ESTABLISHED channel " << channelId);
     return HandshakeResult::OK;
 }
 
@@ -183,22 +184,22 @@ HandshakeResult HandshakeEngine::runResponder(
 
     HandshakePacket cap{};
     if (!ctrlRecv(cap, timeoutUs)) {
-        IPC_WARN("Responder timeout waiting CAP");
+        LOG_WARN(g_logIpc, "Responder timeout waiting CAP");
         return HandshakeResult::ERR_TIMEOUT;
     }
     if (cap.m_eFlags & FLAG_RST)    return HandshakeResult::ERR_RST_RECEIVED;
     if (!(cap.m_eFlags & FLAG_CAP)) return HandshakeResult::ERR_BAD_FLAGS;
     if (cap.m_uVersion != IPC_PROTOCOL_VERSION) return HandshakeResult::ERR_VERSION;
     if (channelId != 0 && cap.m_uChannelId != channelId) {
-        IPC_ERROR("Responder: channel ID mismatch got=" << cap.m_uChannelId
+        LOG_ERROR(g_logIpc, "Responder: channel ID mismatch got=" << cap.m_uChannelId
                   << " want=" << channelId);
         return HandshakeResult::ERR_BAD_FLAGS;
     }
     if (!verifyBootstrapTag(cap)) {
-        IPC_ERROR("Responder: CAP bootstrap tag invalid");
+        LOG_ERROR(g_logIpc, "Responder: CAP bootstrap tag invalid");
         return HandshakeResult::ERR_AUTH_FAIL;
     }
-    IPC_DEBUG("Responder: CAP received and verified channel " << cap.m_uChannelId);
+    LOG_DEBUG(g_logIpc, "Responder: CAP received and verified channel " << cap.m_uChannelId);
 
     HandshakePacket vrf{};
     vrf.m_eFlags = FLAG_VRF | FLAG_CAP; vrf.m_uVersion = IPC_PROTOCOL_VERSION;
@@ -215,27 +216,27 @@ HandshakeResult HandshakeEngine::runResponder(
         blake3_hasher_finalize(&h, vrf.m_aPacketTag, 32);
     }
     if (!ctrlSend(vrf)) return HandshakeResult::ERR_NO_MEMORY;
-    IPC_DEBUG("Responder sent VRF|CAP");
+    LOG_DEBUG(g_logIpc, "Responder sent VRF|CAP");
 
     HandshakePacket ack{};
     if (!ctrlRecv(ack, timeoutUs)) {
-        IPC_WARN("Responder timeout waiting ACK|CHK");
+        LOG_WARN(g_logIpc, "Responder timeout waiting ACK|CHK");
         return HandshakeResult::ERR_TIMEOUT;
     }
     if (ack.m_eFlags & FLAG_RST) return HandshakeResult::ERR_RST_RECEIVED;
     if ((ack.m_eFlags & (FLAG_ACK|FLAG_CHK)) != (FLAG_ACK|FLAG_CHK))
         return HandshakeResult::ERR_BAD_FLAGS;
     if (!verifyPacketTag(sessionKey, ack)) {
-        IPC_ERROR("Responder: ACK|CHK tag invalid");
+        LOG_ERROR(g_logIpc, "Responder: ACK|CHK tag invalid");
         return HandshakeResult::ERR_AUTH_FAIL;
     }
     uint8_t expectedB[32];
     keyedResponse(sessionKey, vrf.m_aChallenge, expectedB);
     if (!ctCompare(expectedB, ack.m_aResponse, 32)) {
-        IPC_ERROR("Responder: key mismatch on response_B");
+        LOG_ERROR(g_logIpc, "Responder: key mismatch on response_B");
         return HandshakeResult::ERR_KEY_MISMATCH;
     }
-    IPC_DEBUG("Responder: mutual key confirmed");
+    LOG_DEBUG(g_logIpc, "Responder: mutual key confirmed");
 
     HandshakePacket rdy{};
     rdy.m_eFlags = FLAG_RDY; rdy.m_uVersion = IPC_PROTOCOL_VERSION;
@@ -243,7 +244,7 @@ HandshakeResult HandshakeEngine::runResponder(
     tagPacket(sessionKey, rdy);
     if (!ctrlSend(rdy)) return HandshakeResult::ERR_NO_MEMORY;
     m_bEstablished = true;
-    IPC_INFO("Responder ESTABLISHED channel " << cap.m_uChannelId);
+    LOG_INFO(g_logIpc, "Responder ESTABLISHED channel " << cap.m_uChannelId);
     return HandshakeResult::OK;
 }
 
@@ -257,7 +258,7 @@ void HandshakeEngine::sendRst(uint32_t channelId,
     tagPacket(sessionKey, rst);
     ctrlSend(rst);
     m_bEstablished = false;
-    IPC_WARN("RST sent on channel " << channelId
+    LOG_WARN(g_logIpc, "RST sent on channel " << channelId
              << " reason=" << static_cast<int>(reason));
 }
 
@@ -272,7 +273,7 @@ HandshakeResult HandshakeEngine::runReKey(
     randomBytes(rek.m_aChallenge, 32);
     tagPacket(oldKey, rek);
     if (!ctrlSend(rek)) return HandshakeResult::ERR_NO_MEMORY;
-    IPC_INFO("REK sent on channel " << channelId);
+    LOG_INFO(g_logIpc, "REK sent on channel " << channelId);
 
     HandshakePacket resp{};
     if (!ctrlRecv(resp, timeoutUs))   return HandshakeResult::ERR_TIMEOUT;
@@ -284,7 +285,7 @@ HandshakeResult HandshakeEngine::runReKey(
     keyedResponse(newKey, rek.m_aChallenge, expected);
     if (!ctCompare(expected, resp.m_aResponse, 32))
         return HandshakeResult::ERR_KEY_MISMATCH;
-    IPC_INFO("REK complete on channel " << channelId);
+    LOG_INFO(g_logIpc, "REK complete on channel " << channelId);
     return HandshakeResult::OK;
 }
 

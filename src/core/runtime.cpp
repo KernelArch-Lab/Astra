@@ -19,7 +19,6 @@
 
 #include <astra/core/runtime.h>
 #include <astra/core/logger.h>
-#include <astra/core/ipc/ipc_logger.h>
 #include <astra/core/ipc/ipc_engine.h>
 #include <astra/asm_core/asm_core.h>
 #include <astra/common/log.h>
@@ -28,6 +27,7 @@
 
 #include <chrono>
 #include <thread>
+ASTRA_DECLARE_LOGGER(g_logIpc);
 
 static const char* LOG_TAG = "core";
 

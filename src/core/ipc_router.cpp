@@ -1,5 +1,6 @@
 #include <astra/core/ipc/ipc_router.h>
-#include <astra/core/ipc/ipc_logger.h>
+#include <astra/core/logger.h>
+ASTRA_DECLARE_LOGGER(g_logIpc);
 #include <cstdio>
 #include <cerrno>
 #include <new>
@@ -98,7 +99,7 @@ uint32_t IpcRouter::createChannel(const char* name,
     acquire();
     if (findByName(name)) { release(); return 0; }
     ChannelEntry* e = findEmpty();
-    if (!e) { IPC_ERROR("Channel table full"); release(); return 0; }
+    if (!e) { LOG_ERROR(g_logIpc, "Channel table full"); release(); return 0; }
 
     strncpy(e->m_szName, name, 31);
     e->m_uId    = m_uNextId++;
@@ -135,12 +136,12 @@ uint32_t IpcRouter::createChannel(const char* name,
 
     acquire();
     if (r != HandshakeResult::OK) {
-        IPC_ERROR("Initiator handshake failed '" << name << "' err="
+        LOG_ERROR(g_logIpc, "Initiator handshake failed '" << name << "' err="
                   << static_cast<int>(r));
         teardown(*e, false, HandshakeReason::NORMAL); release(); return 0;
     }
     e->m_eState = ChannelState::ESTABLISHED;
-    IPC_INFO("Channel '" << name << "' ESTABLISHED id=" << id);
+    LOG_INFO(g_logIpc, "Channel '" << name << "' ESTABLISHED id=" << id);
     release();
     return id;
 }
@@ -163,12 +164,12 @@ uint32_t IpcRouter::joinChannel(const char* name,
 
     e->m_pDataChan = new(std::nothrow) IpcChannel{};
     if (!e->m_pDataChan || !e->m_pDataChan->attachShm(name)) {
-        IPC_ERROR("Child data attach failed '" << name << "'");
+        LOG_ERROR(g_logIpc, "Child data attach failed '" << name << "'");
         teardown(*e, false, HandshakeReason::NORMAL); release(); return 0;
     }
     e->m_pCtrlChan = attachCtrlShm(name, e->m_iCtrlFd);
     if (!e->m_pCtrlChan) {
-        IPC_ERROR("Child ctrl attach failed '" << name << "'");
+        LOG_ERROR(g_logIpc, "Child ctrl attach failed '" << name << "'");
         teardown(*e, false, HandshakeReason::NORMAL); release(); return 0;
     }
     e->m_bCtrlOwner = false;
@@ -188,13 +189,13 @@ uint32_t IpcRouter::joinChannel(const char* name,
 
     acquire();
     if (r != HandshakeResult::OK) {
-        IPC_ERROR("Responder handshake failed '" << name << "' err="
+        LOG_ERROR(g_logIpc, "Responder handshake failed '" << name << "' err="
                   << static_cast<int>(r));
         teardown(*e, false, HandshakeReason::NORMAL); release(); return 0;
     }
     e->m_eState = ChannelState::ESTABLISHED;
     e->m_uId = 1;
-    IPC_INFO("Child joined channel '" << name << "'");
+    LOG_INFO(g_logIpc, "Child joined channel '" << name << "'");
     release();
     return e->m_uId;
 }
@@ -236,10 +237,10 @@ void IpcRouter::onAuthFail(const char* name) noexcept {
     uint32_t count = ++e->m_uAuthFailCount;
     release();
 
-    IPC_WARN("AUTH_FAIL #" << count << " on channel '" << name << "'");
+    LOG_WARN(g_logIpc, "AUTH_FAIL #" << count << " on channel '" << name << "'");
 
     if (count >= MAX_AUTH_FAIL) {
-        IPC_WARN("AUTH_FAIL threshold reached on '"
+        LOG_WARN(g_logIpc, "AUTH_FAIL threshold reached on '"
                  << name << "' — triggering REK");
         // REK re-derives the session key — channel stays alive
         // For now trigger RST since we don't have the new token yet
@@ -258,7 +259,7 @@ void IpcRouter::onCapabilityRevoked(uint64_t tokenIdHigh,
         if (e.isEmpty()) continue;
         if (e.m_uTokenIdHigh == tokenIdHigh &&
             e.m_uTokenIdLow  == tokenIdLow) {
-            IPC_WARN("Token revoked — resetting channel '" << e.m_szName << "'");
+            LOG_WARN(g_logIpc, "Token revoked — resetting channel '" << e.m_szName << "'");
             teardown(e, true, HandshakeReason::REVOKED);
         }
     }
@@ -286,10 +287,10 @@ void IpcRouter::tickHeartbeat() noexcept {
             e.m_uHbtSeq++;
         } else {
             e.m_uHbtMissCount++;
-            IPC_WARN("HBT miss #" << e.m_uHbtMissCount
+            LOG_WARN(g_logIpc, "HBT miss #" << e.m_uHbtMissCount
                      << " on channel '" << e.m_szName << "'");
             if (e.m_uHbtMissCount >= MAX_HBT_MISS) {
-                IPC_ERROR("HBT timeout on '" << e.m_szName
+                LOG_ERROR(g_logIpc, "HBT timeout on '" << e.m_szName
                           << "' — channel dead, resetting");
                 teardown(e, true, HandshakeReason::TIMEOUT);
             }
@@ -305,7 +306,7 @@ bool IpcRouter::closeChannel(const char* name) noexcept {
     if (!e) { release(); return false; }
     teardown(*e, false, HandshakeReason::NORMAL);
     release();
-    IPC_INFO("Channel '" << name << "' closed");
+    LOG_INFO(g_logIpc, "Channel '" << name << "' closed");
     return true;
 }
 
@@ -316,7 +317,7 @@ void IpcRouter::resetChannel(const char* name,
     if (!e) { release(); return; }
     teardown(*e, true, reason);
     release();
-    IPC_WARN("Channel '" << name << "' reset reason="
+    LOG_WARN(g_logIpc, "Channel '" << name << "' reset reason="
              << static_cast<int>(reason));
 }
 

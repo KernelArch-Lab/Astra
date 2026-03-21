@@ -1,6 +1,7 @@
 #include <astra/core/ipc/ipc_engine.h>
 #include <astra/core/service.h>
 #include <unistd.h>
+ASTRA_DECLARE_LOGGER(g_logIpc);
 
 namespace astra::ipc {
 
@@ -8,7 +9,7 @@ namespace astra::ipc {
 astra::Status IpcEngine::onInit() {
     g_logIpc.initialise("ipc", "logs/ipc.log",
                          astra::core::LogLevel::DEBUG, true);
-    IPC_INFO("IpcEngine initialised — M-03 Zero-Copy IPC Engine");
+    LOG_INFO(g_logIpc, "IpcEngine initialised — M-03 Zero-Copy IPC Engine");
     return {};
 }
 
@@ -16,7 +17,7 @@ astra::Status IpcEngine::onStart() {
     m_bRunning.store(true,  std::memory_order_release);
     m_bStopHbt.store(false, std::memory_order_release);
     m_hbtThread = std::thread([this]{ heartbeatLoop(); });
-    IPC_INFO("IpcEngine started — heartbeat thread active (250ms)");
+    LOG_INFO(g_logIpc, "IpcEngine started — heartbeat thread active (250ms)");
     return {};
 }
 
@@ -26,17 +27,17 @@ astra::Status IpcEngine::onStop() {
     m_bStopHbt.store(true,  std::memory_order_release);
     if (m_hbtThread.joinable()) m_hbtThread.join();
     m_router.destroyAll();
-    IPC_INFO("IpcEngine stopped — all channels closed");
+    LOG_INFO(g_logIpc, "IpcEngine stopped — all channels closed");
     return {};
 }
 
 void IpcEngine::heartbeatLoop() noexcept {
-    IPC_DEBUG("Heartbeat thread started");
+    LOG_DEBUG(g_logIpc, "Heartbeat thread started");
     while (!m_bStopHbt.load(std::memory_order_relaxed)) {
         m_router.tickHeartbeat();
         usleep(HBT_INTERVAL_US);
     }
-    IPC_DEBUG("Heartbeat thread stopped");
+    LOG_DEBUG(g_logIpc, "Heartbeat thread stopped");
 }
 
 } // namespace astra::ipc
