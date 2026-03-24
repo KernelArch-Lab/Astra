@@ -95,6 +95,7 @@ set(ASTRA_WARNING_FLAGS
     -Wcast-align
     -Wformat=2
     -Wformat-security
+    -Wno-format-truncation
     -Wnull-dereference
     -Wdouble-promotion
     -Wimplicit-fallthrough
