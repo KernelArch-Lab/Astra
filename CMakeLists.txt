@@ -173,7 +173,7 @@ add_subdirectory(src/asm_core)
 add_subdirectory(src/core)
 
 # -- Phase 2+ modules (stubbed, uncomment when work begins) --
-# add_subdirectory(src/isolation)
+add_subdirectory(src/isolation) # M-02: Isolation Layer (Sprint 1)
 # add_subdirectory(src/ipc)
 # add_subdirectory(src/checkpoint)
 # add_subdirectory(src/replay)
@@ -225,8 +225,8 @@ target_link_libraries(astra_demo
 # --------------------------------------------------------------------------
 if(ASTRA_ENABLE_TESTS)
     enable_testing()
-    # add_subdirectory(tests)
-    message(STATUS "Test suite enabled (stubs only for initial commit)")
+    add_subdirectory(tests/isolation)
+    message(STATUS "Test suite enabled")
 endif()
 
 # --------------------------------------------------------------------------
