@@ -15,6 +15,7 @@ set(CORE_SOURCES
     service_registry.cpp
     event_bus.cpp
     process_manager.cpp
+    hook_registry.cpp
     demo_service.cpp
     logger.cpp
 )
