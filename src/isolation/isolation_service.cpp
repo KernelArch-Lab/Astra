@@ -7,8 +7,11 @@
 #include <astra/isolation/isolation_service.h>
 #include <astra/isolation/namespace_manager.h>
 #include <astra/core/runtime.h>
+#include <astra/core/logger.h>
 
 #include <unistd.h>     // getuid(), getgid()
+
+ASTRA_DEFINE_LOGGER(g_logIsolation);
 
 namespace astra
 {

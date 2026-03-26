@@ -7,6 +7,9 @@
 // ============================================================================
 #include <astra/isolation/profile_engine.h>
 #include <astra/common/result.h>
+#include <astra/core/logger.h>
+
+ASTRA_DEFINE_LOGGER(g_logProfileEngine);
 
 namespace astra
 {
@@ -235,7 +238,7 @@ SandboxProfile ProfileEngine::buildParanoidProfile()
 // Example: a cryptographic signing service, a log aggregator.
 //
 // Differences from Paranoid:
-//   - 512 MiB RAM, 4 cores (4000 permille = 400%)
+//   - 512 MiB RAM, 40% of one CPU (400 permille)
 //   - Up to 64 PIDs (a small thread pool is okay)
 //   - Network: BRIDGED (veth pair, external connectivity controlled by iptables)
 //   - Child processes allowed (e.g. service can spawn worker threads via clone)
@@ -254,7 +257,7 @@ SandboxProfile ProfileEngine::buildStrictProfile()
 
     lP.m_eSeccompMode           = SeccompMode::ENFORCE;
     lP.m_limits.m_uMemoryLimitMb    = 512;
-    lP.m_limits.m_uCpuMaxPermille   = 400;   // 4 CPUs × 100%
+    lP.m_limits.m_uCpuMaxPermille   = 400;   // 40% of one CPU
     lP.m_limits.m_uMaxPids          = 64;
     lP.m_eNetworkPolicy         = NetworkPolicy::BRIDGED;
     lP.m_bLandlockEnabled       = true;

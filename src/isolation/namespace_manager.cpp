@@ -43,6 +43,9 @@
 //   We keep these fds open (via ScopedFd) to prevent premature destruction.
 // ============================================================================
 #include <astra/isolation/namespace_manager.h>
+#include <astra/core/logger.h>
+
+ASTRA_DEFINE_LOGGER(g_logNamespaceMgr);
 
 // Linux-specific headers — only compile on Linux
 #include <fcntl.h>          // open(), O_RDONLY, O_WRONLY, O_CREAT, O_TRUNC
@@ -118,6 +121,26 @@ Status NamespaceManager::setup(const SandboxProfile& aProfile,
                                U32                   aUHostUid,
                                U32                   aUHostGid)
 {
+    // --- Guard: PID namespace requires USER namespace ---
+    // On unprivileged processes, unshare(CLONE_NEWPID) needs a user
+    // namespace first. Catch this misconfiguration early.
+    if (aProfile.m_nsFlags.m_bPid && !aProfile.m_nsFlags.m_bUser)
+    {
+        return std::unexpected(makeError(
+            ErrorCode::INVALID_ARGUMENT,
+            ErrorCategory::ISOLATION,
+            "PID namespace requires USER namespace for unprivileged operation"
+        ));
+    }
+
+    // --- Guard: nothing to do ---
+    // If no namespaces are requested, skip straight to ACTIVE.
+    if (!aProfile.m_nsFlags.m_bUser && !aProfile.m_nsFlags.m_bPid)
+    {
+        m_eState.store(NamespaceState::ACTIVE, std::memory_order_release);
+        return {};  // nothing to set up
+    }
+
     // --- Step 1: USER namespace ---
     // Only proceed if the profile requires a user namespace
     if (aProfile.m_nsFlags.m_bUser)

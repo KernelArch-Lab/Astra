@@ -5,10 +5,12 @@
 // Sprint 1 Test:
 //   1. Fork a child process
 //   2. Child calls NamespaceManager::setup() with USER + PID namespaces
-//   3. Child calls getpid() — should return 1 (it's PID 1 in its namespace)
-//   4. Child reads /proc and lists what it sees
-//   5. Parent verifies child's REAL Linux PID is NOT 1
-//   6. Parent verifies child exited cleanly
+//   3. Child forks AGAIN (unshare(CLONE_NEWPID) only takes effect on
+//      the next fork — the grandchild becomes PID 1 in the new namespace)
+//   4. Grandchild calls getpid() — should return 1
+//   5. Grandchild reads /proc and lists what it sees
+//   6. Parent verifies child's REAL Linux PID is NOT 1
+//   7. Parent verifies child exited cleanly
 //
 // HOW TO RUN:
 //   cd /path/to/Astra
@@ -254,9 +256,43 @@ int main()
         printf("[CHILD] Namespace state = %d (expected: 4 = ACTIVE)\n",
                static_cast<int>(lNsMgr.state()));
 
-        // Run the actual tests
-        int lIResult = runChildTests();
-        exit(lIResult);
+        // ---------------------------------------------------------------
+        // CRITICAL FIX: unshare(CLONE_NEWPID) does NOT move the current
+        // process into the new PID namespace. It only affects the NEXT
+        // child created by fork(). So we must fork AGAIN here.
+        //
+        // After this second fork:
+        //   - The grandchild is PID 1 inside the new PID namespace
+        //   - The intermediate child (us) waits for the grandchild
+        //   - The parent waits for us
+        //
+        // Flow: Parent → Child (unshare) → fork() → Grandchild (PID 1)
+        // ---------------------------------------------------------------
+        pid_t lIGrandchild = fork();
+
+        if (lIGrandchild < 0)
+        {
+            perror("[CHILD] fork() for PID namespace entry failed");
+            exit(EXIT_FAILURE);
+        }
+
+        if (lIGrandchild == 0)
+        {
+            // GRANDCHILD — this process IS PID 1 in the new PID namespace
+            int lIResult = runChildTests();
+            exit(lIResult);
+        }
+        else
+        {
+            // INTERMEDIATE CHILD — wait for grandchild, forward exit code
+            int lIGcStatus = 0;
+            waitpid(lIGrandchild, &lIGcStatus, 0);
+            if (WIFEXITED(lIGcStatus))
+            {
+                exit(WEXITSTATUS(lIGcStatus));
+            }
+            exit(EXIT_FAILURE);
+        }
     }
 
     // -----------------------------------------------------------------------
