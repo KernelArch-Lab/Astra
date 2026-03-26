@@ -225,8 +225,8 @@ target_link_libraries(astra_demo
 # --------------------------------------------------------------------------
 if(ASTRA_ENABLE_TESTS)
     enable_testing()
-    # add_subdirectory(tests)
-    message(STATUS "Test suite enabled (stubs only for initial commit)")
+    add_subdirectory(tests/core)
+    message(STATUS "Test suite enabled (Phase 2 core tests)")
 endif()
 
 # --------------------------------------------------------------------------

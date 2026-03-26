@@ -25,6 +25,7 @@
 #include <astra/common/types.h>
 #include <astra/common/result.h>
 #include <astra/core/capability.h>
+#include <astra/core/hook.h>
 
 #include <atomic>
 #include <functional>
@@ -198,14 +199,22 @@ public:
     [[nodiscard]] U32 totalSpawned() const noexcept;
 
     // ---------------------------------------------------------------
-    // Isolation hook - called by the process manager just before a
-    // newly spawned child begins executing. M-02 registers this hook
-    // to apply namespace/seccomp/cgroup isolation.
+    // Hook registry - manages all process lifecycle hooks
+    // ---------------------------------------------------------------
+    HookRegistry& hooks() { return m_hookRegistry; }
+    const HookRegistry& hooks() const { return m_hookRegistry; }
+
+    // ---------------------------------------------------------------
+    // Isolation hook - backward compatibility wrapper.
+    // Called by the process manager just before a newly spawned child
+    // begins executing. M-02 registers this hook to apply namespace/
+    // seccomp/cgroup isolation.
     //
     // Signature: (ProcessId, IsolationProfile) -> Status
     // If the hook returns an error, the spawn is aborted.
     //
-    // This is the PRIMARY integration point between M-01 and M-02.
+    // NOTE: This is now a wrapper around PRE_SPAWN hooks in the
+    // generic hook registry. New code should use hooks() directly.
     // ---------------------------------------------------------------
     using IsolationHook = std::function<Status(
         ProcessId               aUPid,
@@ -237,6 +246,8 @@ private:
     EventBus*                   m_pEventBus;
     IsolationHook               m_fnIsolationHook;
     ProcessEventCallback        m_fnProcessEvent;
+
+    HookRegistry                m_hookRegistry;    // Generic hook chain system
 
     mutable std::atomic<bool>   m_bSpinlock;
 

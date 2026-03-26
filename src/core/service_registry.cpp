@@ -444,7 +444,12 @@ IService* ServiceRegistry::getServicePtr(ServiceId aUId) const
 
 
 // ============================================================================
-// startAll - init and start all registered services in registration order
+// startAll - init and start all registered services respecting dependencies
+//
+// Phase 2: Uses topological sort to determine startup order based on service
+// dependencies. Services are started in dependency order: if A depends on B,
+// B starts first. If a cycle is detected, returns PRECONDITION_FAILED error.
+// If a service fails to start, logs error but continues (don't abort).
 // ============================================================================
 
 Status ServiceRegistry::startAll()
@@ -459,61 +464,78 @@ Status ServiceRegistry::startAll()
     }
 
     U32 lUCount = m_uRegisteredCount.load(std::memory_order_acquire);
-    ASTRA_LOG_INFO(LOG_TAG, "Starting %u registered services...", lUCount);
+    ASTRA_LOG_INFO(LOG_TAG, "Starting %u registered services (dependency-aware)...", lUCount);
 
-    // Start in registration order
-    U32 lUMaxOrder = m_uNextRegistrationOrder.load(std::memory_order_acquire);
-    for (U32 lUOrder = 0; lUOrder < lUMaxOrder; ++lUOrder)
+    // Build topological sort order
+    Result<std::vector<U32>> lSortResult = topologicalSort();
+    if (!lSortResult.has_value())
     {
-        for (U32 lUIdx = 0; lUIdx < m_uMaxServices; ++lUIdx)
+        ASTRA_LOG_ERROR(LOG_TAG, "Topological sort failed (cycle detected?)");
+        return std::unexpected(lSortResult.error());
+    }
+
+    const std::vector<U32>& lVStartOrder = lSortResult.value();
+
+    // Start services in topological order
+    for (U32 lUSlotIdx : lVStartOrder)
+    {
+        if (lUSlotIdx >= m_uMaxServices)
         {
-            ServiceSlot& lSlot = m_pSlots[lUIdx];
-            if (lSlot.m_uRegistrationOrder == lUOrder &&
-                lSlot.m_eState.load(std::memory_order_acquire) == ServiceState::REGISTERED)
+            continue;  // Skip invalid indices
+        }
+
+        ServiceSlot& lSlot = m_pSlots[lUSlotIdx];
+        ServiceState lEState = lSlot.m_eState.load(std::memory_order_acquire);
+
+        // Skip non-registered services
+        if (lEState != ServiceState::REGISTERED)
+        {
+            continue;
+        }
+
+        ASTRA_LOG_INFO(LOG_TAG, "  Starting service [%u] '%s'...",
+                       lSlot.m_handle.m_uId,
+                       lSlot.m_handle.m_szName.c_str());
+
+        lSlot.m_eState.store(ServiceState::STARTING, std::memory_order_release);
+
+        Status lInitStatus = lSlot.m_pService->onInit();
+        if (!lInitStatus.has_value())
+        {
+            lSlot.m_eState.store(ServiceState::FAILED, std::memory_order_release);
+            ASTRA_LOG_ERROR(LOG_TAG, "  Service '%s' init FAILED: %s",
+                           lSlot.m_handle.m_szName.c_str(),
+                           lInitStatus.error().m_szMessage);
+
+            if (m_fnServiceEvent)
             {
-                ASTRA_LOG_INFO(LOG_TAG, "  Starting service [%u] '%s'...",
-                               lSlot.m_handle.m_uId,
-                               lSlot.m_handle.m_szName.c_str());
-
-                lSlot.m_eState.store(ServiceState::STARTING, std::memory_order_release);
-
-                Status lInitStatus = lSlot.m_pService->onInit();
-                if (!lInitStatus.has_value())
-                {
-                    lSlot.m_eState.store(ServiceState::FAILED, std::memory_order_release);
-                    ASTRA_LOG_ERROR(LOG_TAG, "  Service '%s' init FAILED",
-                                   lSlot.m_handle.m_szName.c_str());
-
-                    if (m_fnServiceEvent)
-                    {
-                        m_fnServiceEvent(lSlot.m_handle.m_uId, lSlot.m_handle.m_szName, "failed");
-                    }
-                    continue;
-                }
-
-                Status lStartStatus = lSlot.m_pService->onStart();
-                if (!lStartStatus.has_value())
-                {
-                    lSlot.m_eState.store(ServiceState::FAILED, std::memory_order_release);
-                    ASTRA_LOG_ERROR(LOG_TAG, "  Service '%s' start FAILED",
-                                   lSlot.m_handle.m_szName.c_str());
-
-                    if (m_fnServiceEvent)
-                    {
-                        m_fnServiceEvent(lSlot.m_handle.m_uId, lSlot.m_handle.m_szName, "failed");
-                    }
-                    continue;
-                }
-
-                lSlot.m_eState.store(ServiceState::RUNNING, std::memory_order_release);
-                ASTRA_LOG_INFO(LOG_TAG, "  Service '%s' RUNNING",
-                               lSlot.m_handle.m_szName.c_str());
-
-                if (m_fnServiceEvent)
-                {
-                    m_fnServiceEvent(lSlot.m_handle.m_uId, lSlot.m_handle.m_szName, "started");
-                }
+                m_fnServiceEvent(lSlot.m_handle.m_uId, lSlot.m_handle.m_szName, "failed");
             }
+            continue;  // Continue with next service despite failure
+        }
+
+        Status lStartStatus = lSlot.m_pService->onStart();
+        if (!lStartStatus.has_value())
+        {
+            lSlot.m_eState.store(ServiceState::FAILED, std::memory_order_release);
+            ASTRA_LOG_ERROR(LOG_TAG, "  Service '%s' start FAILED: %s",
+                           lSlot.m_handle.m_szName.c_str(),
+                           lStartStatus.error().m_szMessage);
+
+            if (m_fnServiceEvent)
+            {
+                m_fnServiceEvent(lSlot.m_handle.m_uId, lSlot.m_handle.m_szName, "failed");
+            }
+            continue;  // Continue with next service despite failure
+        }
+
+        lSlot.m_eState.store(ServiceState::RUNNING, std::memory_order_release);
+        ASTRA_LOG_INFO(LOG_TAG, "  Service '%s' RUNNING",
+                       lSlot.m_handle.m_szName.c_str());
+
+        if (m_fnServiceEvent)
+        {
+            m_fnServiceEvent(lSlot.m_handle.m_uId, lSlot.m_handle.m_szName, "started");
         }
     }
 
@@ -665,6 +687,195 @@ U32 ServiceRegistry::idToSlotIndex(ServiceId aUId) const noexcept
         return m_uMaxServices;  // will fail bounds check
     }
     return static_cast<U32>(aUId - 1);
+}
+
+// ============================================================================
+// topologicalSort - Kahn's algorithm for dependency-based ordering
+//
+// Builds an adjacency list from service dependencies, then processes nodes
+// with 0 in-degree first, decrementing in-degree of dependents. Returns an
+// error if a cycle is detected (final count < total services).
+// ============================================================================
+
+Result<std::vector<U32>> ServiceRegistry::topologicalSort() const
+{
+    std::vector<U32> lVResult;
+
+    if (!m_bInitialised)
+    {
+        return lVResult;  // Empty result for uninitialized registry
+    }
+
+    // Count registered services
+    U32 lURegisteredCount = 0;
+    for (U32 lUIdx = 0; lUIdx < m_uMaxServices; ++lUIdx)
+    {
+        if (m_pSlots[lUIdx].m_eState.load(std::memory_order_acquire) != ServiceState::UNREGISTERED)
+        {
+            ++lURegisteredCount;
+        }
+    }
+
+    if (lURegisteredCount == 0)
+    {
+        return lVResult;  // Empty result for no services
+    }
+
+    // Build in-degree map and adjacency lists
+    // We use a simple approach: for each service, get its dependencies
+    std::vector<U32> lVInDegree(m_uMaxServices, 0);
+    std::vector<std::vector<U32>> lVAdjacency(m_uMaxServices);
+
+    // First pass: gather all dependencies
+    for (U32 lUIdx = 0; lUIdx < m_uMaxServices; ++lUIdx)
+    {
+        ServiceSlot& lSlot = m_pSlots[lUIdx];
+        if (lSlot.m_eState.load(std::memory_order_acquire) == ServiceState::UNREGISTERED)
+        {
+            continue;
+        }
+
+        if (lSlot.m_pService == nullptr)
+        {
+            continue;
+        }
+
+        // Get dependencies from service
+        std::vector<ModuleId> lVDeps = lSlot.m_pService->getDependencies();
+
+        // For each dependency, find the slot and add edge: dep -> this service
+        for (ModuleId lEDepModuleId : lVDeps)
+        {
+            // Find the slot for this module
+            U32 lUDepSlot = m_uMaxServices;
+            for (U32 lUDepIdx = 0; lUDepIdx < m_uMaxServices; ++lUDepIdx)
+            {
+                ServiceSlot& lDepSlot = m_pSlots[lUDepIdx];
+                if (lDepSlot.m_eState.load(std::memory_order_acquire) != ServiceState::UNREGISTERED &&
+                    lDepSlot.m_handle.m_eModuleId == lEDepModuleId)
+                {
+                    lUDepSlot = lUDepIdx;
+                    break;
+                }
+            }
+
+            if (lUDepSlot < m_uMaxServices)
+            {
+                // Add edge: lUDepSlot -> lUIdx
+                lVAdjacency[lUDepSlot].push_back(lUIdx);
+                ++lVInDegree[lUIdx];
+            }
+            else
+            {
+                // Missing dependency - log warning
+                ASTRA_LOG_WARN(LOG_TAG, "Service '%s' depends on missing module M-%02u",
+                               lSlot.m_handle.m_szName.c_str(),
+                               static_cast<U16>(lEDepModuleId));
+            }
+        }
+    }
+
+    // Kahn's algorithm: process nodes with 0 in-degree
+    std::vector<U32> lVQueue;
+    for (U32 lUIdx = 0; lUIdx < m_uMaxServices; ++lUIdx)
+    {
+        if (m_pSlots[lUIdx].m_eState.load(std::memory_order_acquire) != ServiceState::UNREGISTERED &&
+            lVInDegree[lUIdx] == 0)
+        {
+            lVQueue.push_back(lUIdx);
+        }
+    }
+
+    while (!lVQueue.empty())
+    {
+        // Dequeue a service
+        U32 lUIdx = lVQueue.back();
+        lVQueue.pop_back();
+        lVResult.push_back(lUIdx);
+
+        // For each dependent, decrement in-degree
+        for (U32 lUDepIdx : lVAdjacency[lUIdx])
+        {
+            --lVInDegree[lUDepIdx];
+            if (lVInDegree[lUDepIdx] == 0)
+            {
+                lVQueue.push_back(lUDepIdx);
+            }
+        }
+    }
+
+    // Check for cycles: if we didn't process all registered services, there's a cycle
+    if (lVResult.size() != lURegisteredCount)
+    {
+        ASTRA_LOG_ERROR(LOG_TAG, "Dependency cycle detected: processed %zu/%u services",
+                        lVResult.size(), lURegisteredCount);
+        return std::unexpected(makeError(
+            ErrorCode::PRECONDITION_FAILED,
+            ErrorCategory::CORE,
+            "Service dependency cycle detected"
+        ));
+    }
+
+    return lVResult;
+}
+
+// ============================================================================
+// detectCycle - DFS-based cycle detection (helper for validation)
+//
+// Uses depth-first search with visited/recursion stack to detect cycles.
+// ============================================================================
+
+bool ServiceRegistry::detectCycle(U32 aUSlot, std::vector<U8>& aVVisited, std::vector<U8>& aVRecStack) const
+{
+    // Mark as visited and in current path
+    aVVisited[aUSlot] = 1;
+    aVRecStack[aUSlot] = 1;
+
+    ServiceSlot& lSlot = m_pSlots[aUSlot];
+    if (lSlot.m_pService == nullptr)
+    {
+        aVRecStack[aUSlot] = 0;
+        return false;
+    }
+
+    // Get dependencies
+    std::vector<ModuleId> lVDeps = lSlot.m_pService->getDependencies();
+
+    for (ModuleId lEDepModuleId : lVDeps)
+    {
+        // Find the slot for this dependency
+        U32 lUDepSlot = m_uMaxServices;
+        for (U32 lUIdx = 0; lUIdx < m_uMaxServices; ++lUIdx)
+        {
+            if (m_pSlots[lUIdx].m_eState.load(std::memory_order_acquire) != ServiceState::UNREGISTERED &&
+                m_pSlots[lUIdx].m_handle.m_eModuleId == lEDepModuleId)
+            {
+                lUDepSlot = lUIdx;
+                break;
+            }
+        }
+
+        if (lUDepSlot >= m_uMaxServices)
+        {
+            continue;  // Missing dependency, skip
+        }
+
+        if (!aVVisited[lUDepSlot])
+        {
+            if (detectCycle(lUDepSlot, aVVisited, aVRecStack))
+            {
+                return true;
+            }
+        }
+        else if (aVRecStack[lUDepSlot])
+        {
+            // Back edge found - cycle exists
+            return true;
+        }
+    }
+
+    aVRecStack[aUSlot] = 0;
+    return false;
 }
 
 } // namespace core
