@@ -30,6 +30,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace astra
 {
@@ -90,6 +91,11 @@ public:
     // Health check - called periodically by the runtime.
     // Return false if the service is unhealthy and needs restart.
     [[nodiscard]] virtual bool isHealthy() const noexcept = 0;
+
+    // Return the ModuleIds that this service depends on.
+    // The ServiceRegistry will ensure these are started first.
+    // Default: no dependencies.
+    virtual std::vector<ModuleId> getDependencies() const { return {}; }
 };
 
 
@@ -220,6 +226,10 @@ private:
     Result<U32> findFreeSlot() const;
     ServiceId slotIndexToId(U32 aUIndex) const noexcept;
     U32 idToSlotIndex(ServiceId aUId) const noexcept;
+
+    // Dependency graph helpers
+    Result<std::vector<U32>> topologicalSort() const;
+    bool detectCycle(U32 aUSlot, std::vector<U8>& aVVisited, std::vector<U8>& aVRecStack) const;
 };
 
 } // namespace core

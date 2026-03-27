@@ -227,6 +227,8 @@ if(ASTRA_ENABLE_TESTS)
     enable_testing()
     add_subdirectory(tests/isolation)
     message(STATUS "Test suite enabled")
+    add_subdirectory(tests/core)
+    message(STATUS "Test suite enabled (Phase 2 core tests)")
 endif()
 
 # --------------------------------------------------------------------------
