@@ -174,7 +174,7 @@ add_subdirectory(src/core)
 
 # -- Phase 2+ modules (stubbed, uncomment when work begins) --
 add_subdirectory(src/isolation) # M-02: Isolation Layer (Sprint 1)
-# add_subdirectory(src/ipc)
+add_subdirectory(src/ipc)
 # add_subdirectory(src/checkpoint)
 # add_subdirectory(src/replay)
 # add_subdirectory(src/allocator)
@@ -229,6 +229,8 @@ if(ASTRA_ENABLE_TESTS)
     message(STATUS "Test suite enabled")
     add_subdirectory(tests/core)
     message(STATUS "Test suite enabled (Phase 2 core tests)")
+    add_subdirectory(tests/ipc)
+    message(STATUS "Test suite enabled (IPC Sprint 1)")
 endif()
 
 # --------------------------------------------------------------------------

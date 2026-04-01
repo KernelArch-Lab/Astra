@@ -9,9 +9,171 @@
 #define ASTRA_COMMON_RESULT_H
 
 #include <astra/common/types.h>
-#include <expected>
+
+#if defined(__has_include)
+#  if __has_include(<expected>)
+#    include <expected>
+#  endif
+#endif
+
+#include <type_traits>
+#include <utility>
+#include <variant>
 #include <string>
 #include <string_view>
+
+#if !defined(__cpp_lib_expected) || (__cpp_lib_expected < 202202L)
+namespace std
+{
+
+template <typename E>
+class unexpected
+{
+public:
+    constexpr explicit unexpected(const E& aError)
+        : m_error(aError)
+    {
+    }
+
+    constexpr explicit unexpected(E&& aError)
+        : m_error(std::move(aError))
+    {
+    }
+
+    [[nodiscard]] constexpr E& error() & noexcept { return m_error; }
+    [[nodiscard]] constexpr const E& error() const& noexcept { return m_error; }
+    [[nodiscard]] constexpr E&& error() && noexcept { return std::move(m_error); }
+
+private:
+    E m_error;
+};
+
+template <typename T, typename E>
+class expected
+{
+public:
+    constexpr expected(const T& aValue)
+        : m_storage(aValue)
+    {
+    }
+
+    constexpr expected(T&& aValue)
+        : m_storage(std::move(aValue))
+    {
+    }
+
+    constexpr expected(const unexpected<E>& aError)
+        : m_storage(aError.error())
+    {
+    }
+
+    constexpr expected(unexpected<E>&& aError)
+        : m_storage(std::move(aError).error())
+    {
+    }
+
+    [[nodiscard]] constexpr bool has_value() const noexcept
+    {
+        return std::holds_alternative<T>(m_storage);
+    }
+
+    [[nodiscard]] constexpr explicit operator bool() const noexcept
+    {
+        return has_value();
+    }
+
+    [[nodiscard]] constexpr T& value() & noexcept
+    {
+        return std::get<T>(m_storage);
+    }
+
+    [[nodiscard]] constexpr const T& value() const& noexcept
+    {
+        return std::get<T>(m_storage);
+    }
+
+    [[nodiscard]] constexpr T&& value() && noexcept
+    {
+        return std::get<T>(std::move(m_storage));
+    }
+
+    [[nodiscard]] constexpr E& error() & noexcept
+    {
+        return std::get<E>(m_storage);
+    }
+
+    [[nodiscard]] constexpr const E& error() const& noexcept
+    {
+        return std::get<E>(m_storage);
+    }
+
+    [[nodiscard]] constexpr E&& error() && noexcept
+    {
+        return std::get<E>(std::move(m_storage));
+    }
+
+private:
+    std::variant<T, E> m_storage;
+};
+
+template <typename E>
+class expected<void, E>
+{
+public:
+    constexpr expected() noexcept
+        : m_bHasValue(true)
+        , m_error()
+    {
+    }
+
+    constexpr expected(const unexpected<E>& aError)
+        : m_bHasValue(false)
+        , m_error(aError.error())
+    {
+    }
+
+    constexpr expected(unexpected<E>&& aError)
+        : m_bHasValue(false)
+        , m_error(std::move(aError).error())
+    {
+    }
+
+    [[nodiscard]] constexpr bool has_value() const noexcept
+    {
+        return m_bHasValue;
+    }
+
+    [[nodiscard]] constexpr explicit operator bool() const noexcept
+    {
+        return has_value();
+    }
+
+    constexpr void value() const noexcept
+    {
+    }
+
+    [[nodiscard]] constexpr E& error() & noexcept
+    {
+        return m_error;
+    }
+
+    [[nodiscard]] constexpr const E& error() const& noexcept
+    {
+        return m_error;
+    }
+
+    [[nodiscard]] constexpr E&& error() && noexcept
+    {
+        return std::move(m_error);
+    }
+
+private:
+    bool m_bHasValue;
+    E    m_error;
+};
+
+} // namespace std
+#endif
 
 namespace astra
 {

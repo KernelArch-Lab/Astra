@@ -8,6 +8,9 @@
 #include <astra/asm_core/asm_core.h>
 #include <astra/common/log.h>
 
+#include <string>
+#include <string_view>
+#include <vector>
 #include <cstring>
 #include <new>
 #include <thread>
@@ -503,9 +506,10 @@ Status ServiceRegistry::startAll()
         if (!lInitStatus.has_value())
         {
             lSlot.m_eState.store(ServiceState::FAILED, std::memory_order_release);
+            std::string lSzInitError(lInitStatus.error().message());
             ASTRA_LOG_ERROR(LOG_TAG, "  Service '%s' init FAILED: %s",
                            lSlot.m_handle.m_szName.c_str(),
-                           lInitStatus.error().m_szMessage);
+                           lSzInitError.c_str());
 
             if (m_fnServiceEvent)
             {
@@ -518,9 +522,10 @@ Status ServiceRegistry::startAll()
         if (!lStartStatus.has_value())
         {
             lSlot.m_eState.store(ServiceState::FAILED, std::memory_order_release);
+            std::string lSzStartError(lStartStatus.error().message());
             ASTRA_LOG_ERROR(LOG_TAG, "  Service '%s' start FAILED: %s",
                            lSlot.m_handle.m_szName.c_str(),
-                           lStartStatus.error().m_szMessage);
+                           lSzStartError.c_str());
 
             if (m_fnServiceEvent)
             {
