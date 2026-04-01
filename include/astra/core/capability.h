@@ -95,6 +95,12 @@ inline constexpr Permission operator&(Permission aELeft, Permission aERight) noe
     );
 }
 
+inline constexpr Permission& operator|=(Permission& aELeft, Permission aERight) noexcept
+{
+    aELeft = aELeft | aERight;
+    return aELeft;
+}
+
 inline constexpr Permission operator~(Permission aEPerm) noexcept
 {
     return static_cast<Permission>(~static_cast<U64>(aEPerm));
