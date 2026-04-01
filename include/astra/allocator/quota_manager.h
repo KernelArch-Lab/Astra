@@ -54,6 +54,7 @@ struct QuotaEntry
     U64 m_uTotalAllocated;      // lifetime bytes allocated
     U64 m_uTotalReleased;       // lifetime bytes released
     U64 m_uRejections;          // times quota was exceeded
+    U64 m_uUnderflows;          // times release exceeded current usage (bug indicator)
     bool m_bEnabled;             // whether quota enforcement is active
 };
 
@@ -68,7 +69,7 @@ public:
     {
         for (U32 i = 0; i < MAX_QUOTA_MODULES; ++i)
         {
-            m_entries[i] = QuotaEntry{0, 0, 0, 0, 0, 0, false};
+            m_entries[i] = QuotaEntry{0, 0, 0, 0, 0, 0, 0, false};
         }
     }
 
@@ -99,7 +100,7 @@ public:
         if (lUIdx >= MAX_QUOTA_MODULES) return;
 
         SpinGuard lGuard(m_spinlock);
-        m_entries[lUIdx] = QuotaEntry{0, 0, 0, 0, 0, 0, false};
+        m_entries[lUIdx] = QuotaEntry{0, 0, 0, 0, 0, 0, 0, false};
     }
 
     // -----------------------------------------------------------------
@@ -172,6 +173,7 @@ public:
 
         if (aUBytes > lEntry.m_uCurrentUsage)
         {
+            ++lEntry.m_uUnderflows;  // bug indicator: releasing more than held
             lEntry.m_uCurrentUsage = 0;
         }
         else
@@ -189,7 +191,7 @@ public:
         U32 lUIdx = static_cast<U32>(aEModule);
         if (lUIdx >= MAX_QUOTA_MODULES)
         {
-            return QuotaEntry{0, 0, 0, 0, 0, 0, false};
+            return QuotaEntry{0, 0, 0, 0, 0, 0, 0, false};
         }
         return m_entries[lUIdx];
     }
@@ -204,13 +206,23 @@ public:
         return lUTotal;
     }
 
+    [[nodiscard]] U64 totalUnderflows() const noexcept
+    {
+        U64 lUTotal = 0;
+        for (U32 i = 0; i < MAX_QUOTA_MODULES; ++i)
+        {
+            lUTotal += m_entries[i].m_uUnderflows;
+        }
+        return lUTotal;
+    }
+
     // Reset all quotas
     void reset() noexcept
     {
         SpinGuard lGuard(m_spinlock);
         for (U32 i = 0; i < MAX_QUOTA_MODULES; ++i)
         {
-            m_entries[i] = QuotaEntry{0, 0, 0, 0, 0, 0, false};
+            m_entries[i] = QuotaEntry{0, 0, 0, 0, 0, 0, 0, false};
         }
     }
 

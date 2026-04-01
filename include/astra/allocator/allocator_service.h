@@ -14,10 +14,10 @@
 //
 // Allocation flow (Sprint 3):
 //   allocateFor(module, size, capToken)
-//     → check MEM_ALLOC capability
-//     → check module quota
-//     → route to MemoryManager
-//     → emit ALLOC audit event (or QUOTA_REJECT)
+//     → check MEM_ALLOC capability  (CAPABILITY_REJECT on failure)
+//     → check module quota          (QUOTA_REJECT on failure)
+//     → route to MemoryManager      (POOL_EXHAUSTED on failure)
+//     → emit ALLOC audit event on success
 //
 // Dependency: M-01 Core only (declared via getDependencies).
 // No dependency on M-02 Isolation, M-03 IPC, or M-09 eBPF.
@@ -142,9 +142,9 @@ public:
         // Step 1: Capability check — caller must have MEM_ALLOC
         if (!core::hasPermission(aCapToken.m_ePermissions, core::Permission::MEM_ALLOC))
         {
-            // Emit audit event for the rejection
+            // Emit audit event for the capability rejection
             m_auditor.emit(AuditEvent{
-                AuditEventType::QUOTA_REJECT,
+                AuditEventType::CAPABILITY_REJECT,
                 aEModule, aUSize, 0, AllocTier::NONE, nullptr, 0
             });
             return { nullptr, AllocTier::NONE, 0 };
@@ -165,8 +165,12 @@ public:
 
         if (lResult.m_pBlock == nullptr)
         {
-            // Pool exhausted — release the quota we reserved
+            // Pool exhausted — release the quota we reserved and audit
             m_quotaManager.release(aEModule, aUSize);
+            m_auditor.emit(AuditEvent{
+                AuditEventType::POOL_EXHAUSTED,
+                aEModule, aUSize, 0, AllocTier::NONE, nullptr, 0
+            });
             return lResult;
         }
 

@@ -7,12 +7,14 @@
 // for M-09 eBPF integration, security logging, and runtime profiling.
 //
 // Events:
-//   ALLOC          - successful allocation (module, size, tier, pointer)
-//   FREE           - successful deallocation (module, size, pointer)
-//   QUOTA_REJECT   - allocation rejected by quota manager
-//   DOUBLE_FREE    - double-free attempt detected
-//   FOREIGN_PTR    - foreign pointer rejection
-//   CORRUPTION     - corruption detected in freed block
+//   ALLOC             - successful allocation (module, size, tier, pointer)
+//   FREE              - successful deallocation (module, size, pointer)
+//   QUOTA_REJECT      - allocation rejected by quota manager
+//   DOUBLE_FREE       - double-free attempt detected
+//   FOREIGN_PTR       - foreign pointer rejection
+//   CORRUPTION        - corruption detected in freed block
+//   CAPABILITY_REJECT - allocation rejected: caller lacks MEM_ALLOC
+//   POOL_EXHAUSTED    - allocation failed: pool tier had no free blocks
 //
 // Design:
 //   - AuditEvent struct carries all event data
@@ -40,12 +42,14 @@ namespace allocator
 // -------------------------------------------------------------------------
 enum class AuditEventType : U8
 {
-    ALLOC           = 0,
-    FREE            = 1,
-    QUOTA_REJECT    = 2,
-    DOUBLE_FREE     = 3,
-    FOREIGN_PTR     = 4,
-    CORRUPTION      = 5
+    ALLOC             = 0,
+    FREE              = 1,
+    QUOTA_REJECT      = 2,
+    DOUBLE_FREE       = 3,
+    FOREIGN_PTR       = 4,
+    CORRUPTION        = 5,
+    CAPABILITY_REJECT = 6,
+    POOL_EXHAUSTED    = 7
 };
 
 // -------------------------------------------------------------------------

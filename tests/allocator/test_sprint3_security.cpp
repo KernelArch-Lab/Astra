@@ -171,7 +171,7 @@ static void test_capability_gate()
 
     CapabilityToken lGoodToken = makeToken(Permission::MEM_ALLOC | Permission::PROC_SPAWN);
     CapabilityToken lBadToken = makeToken(Permission::PROC_SPAWN);  // no MEM_ALLOC
-    CapabilityToken lNullToken;
+    CapabilityToken lNullToken{};  // zero-init all fields
 
     CHECK(hasPermission(lGoodToken.m_ePermissions, Permission::MEM_ALLOC),
           "good token has MEM_ALLOC");
@@ -311,11 +311,11 @@ static void test_integrated_pipeline()
     CHECK(!hasPermission(lBadToken.m_ePermissions, Permission::MEM_ALLOC),
           "bad token rejected at cap gate");
     auditor.emit(AuditEvent{
-        AuditEventType::QUOTA_REJECT, ModuleId::IPC, 64, 0,
+        AuditEventType::CAPABILITY_REJECT, ModuleId::IPC, 64, 0,
         AllocTier::NONE, nullptr, 0
     });
     CHECK(lLog.size() == 2, "rejection audited");
-    CHECK(lLog.back().m_eType == AuditEventType::QUOTA_REJECT, "audit type = QUOTA_REJECT");
+    CHECK(lLog.back().m_eType == AuditEventType::CAPABILITY_REJECT, "audit type = CAPABILITY_REJECT");
 
     // === Good token, quota exceeded ===
     CHECK(qm.tryReserve(ModuleId::IPC, 448), "fill quota to 512");
@@ -496,10 +496,12 @@ static void test_quota_exact_boundary()
     qm.release(ModuleId::CORE, 1);
     CHECK(qm.tryReserve(ModuleId::CORE, 1), "1 byte freed, 1 byte fits");
 
-    // Release more than held (clamps to zero)
+    // Release more than held (clamps to zero, tracks underflow)
     qm.release(ModuleId::CORE, 99999);
     QuotaEntry lE = qm.getQuota(ModuleId::CORE);
     CHECK(lE.m_uCurrentUsage == 0, "clamped to zero on over-release");
+    CHECK(lE.m_uUnderflows == 1, "underflow tracked on over-release");
+    CHECK(qm.totalUnderflows() == 1, "totalUnderflows() reports 1");
 }
 
 // ===================================================================
@@ -561,6 +563,83 @@ static void test_scalability_gated()
 }
 
 // ===================================================================
+// 15. New audit event types: CAPABILITY_REJECT and POOL_EXHAUSTED
+// ===================================================================
+static void test_new_audit_event_types()
+{
+    std::printf("\n\033[1;34m=== 15. New audit event types (CAPABILITY_REJECT, POOL_EXHAUSTED) ===\033[0m\n");
+
+    AllocAuditor auditor;
+    std::vector<AuditEvent> lLog;
+    auditor.registerHook(ModuleId::CORE, [&](const AuditEvent& e) {
+        lLog.push_back(e);
+    });
+
+    // CAPABILITY_REJECT
+    auditor.emit(AuditEvent{
+        AuditEventType::CAPABILITY_REJECT,
+        ModuleId::IPC, 128, 0, AllocTier::NONE, nullptr, 0
+    });
+    CHECK(lLog.size() == 1, "CAPABILITY_REJECT event captured");
+    CHECK(lLog.back().m_eType == AuditEventType::CAPABILITY_REJECT, "type is CAPABILITY_REJECT");
+    CHECK(static_cast<U8>(lLog.back().m_eType) == 6, "CAPABILITY_REJECT value = 6");
+
+    // POOL_EXHAUSTED
+    auditor.emit(AuditEvent{
+        AuditEventType::POOL_EXHAUSTED,
+        ModuleId::ISOLATION, 256, 0, AllocTier::NONE, nullptr, 0
+    });
+    CHECK(lLog.size() == 2, "POOL_EXHAUSTED event captured");
+    CHECK(lLog.back().m_eType == AuditEventType::POOL_EXHAUSTED, "type is POOL_EXHAUSTED");
+    CHECK(static_cast<U8>(lLog.back().m_eType) == 7, "POOL_EXHAUSTED value = 7");
+
+    // All 8 event types are distinct
+    CHECK(static_cast<U8>(AuditEventType::ALLOC) == 0, "ALLOC = 0");
+    CHECK(static_cast<U8>(AuditEventType::FREE) == 1, "FREE = 1");
+    CHECK(static_cast<U8>(AuditEventType::QUOTA_REJECT) == 2, "QUOTA_REJECT = 2");
+    CHECK(static_cast<U8>(AuditEventType::DOUBLE_FREE) == 3, "DOUBLE_FREE = 3");
+    CHECK(static_cast<U8>(AuditEventType::FOREIGN_PTR) == 4, "FOREIGN_PTR = 4");
+    CHECK(static_cast<U8>(AuditEventType::CORRUPTION) == 5, "CORRUPTION = 5");
+    CHECK(static_cast<U8>(AuditEventType::CAPABILITY_REJECT) == 6, "CAPABILITY_REJECT = 6");
+    CHECK(static_cast<U8>(AuditEventType::POOL_EXHAUSTED) == 7, "POOL_EXHAUSTED = 7");
+}
+
+// ===================================================================
+// 16. Quota underflow tracking
+// ===================================================================
+static void test_quota_underflow_tracking()
+{
+    std::printf("\n\033[1;34m=== 16. Quota underflow tracking ===\033[0m\n");
+    QuotaManager qm;
+
+    qm.setQuota(ModuleId::IPC, 1024);
+    qm.tryReserve(ModuleId::IPC, 100);
+
+    // Normal release — no underflow
+    qm.release(ModuleId::IPC, 50);
+    QuotaEntry lE = qm.getQuota(ModuleId::IPC);
+    CHECK(lE.m_uCurrentUsage == 50, "usage = 50 after releasing 50");
+    CHECK(lE.m_uUnderflows == 0, "no underflow on normal release");
+
+    // Release exactly remaining — no underflow
+    qm.release(ModuleId::IPC, 50);
+    lE = qm.getQuota(ModuleId::IPC);
+    CHECK(lE.m_uCurrentUsage == 0, "usage = 0 after exact release");
+    CHECK(lE.m_uUnderflows == 0, "no underflow on exact release");
+
+    // Release when already at zero — underflow
+    qm.release(ModuleId::IPC, 1);
+    lE = qm.getQuota(ModuleId::IPC);
+    CHECK(lE.m_uCurrentUsage == 0, "still at zero");
+    CHECK(lE.m_uUnderflows == 1, "underflow counted");
+
+    // Another underflow on a different module
+    qm.setQuota(ModuleId::CORE, 500);
+    qm.release(ModuleId::CORE, 999);
+    CHECK(qm.totalUnderflows() == 2, "total underflows = 2 across modules");
+}
+
+// ===================================================================
 // main
 // ===================================================================
 int main()
@@ -582,6 +661,8 @@ int main()
     test_audit_clear();
     test_quota_exact_boundary();
     test_scalability_gated();
+    test_new_audit_event_types();
+    test_quota_underflow_tracking();
 
     std::printf("\n  ================================================\n");
     std::printf("  Assertions: %d passed, %d failed (total: %d)\n",

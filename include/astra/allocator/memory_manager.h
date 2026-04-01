@@ -136,6 +136,7 @@ public:
             return lResult;
         }
 
+        m_uForeignPtrRejections = 0;
         m_bInitialised = true;
         return {};
     }
