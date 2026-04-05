@@ -11,7 +11,7 @@
 #include <astra/allocator/allocator_service.h>
 #include <astra/core/logger.h>
 
-ASTRA_DEFINE_LOGGER(allocator)
+ASTRA_DEFINE_LOGGER(allocator);
 
 // Currently the service is fully header-implemented.
 // Sprint 2 will add guard page setup (mmap/mprotect calls) here.
