@@ -75,7 +75,7 @@ Status Runtime::init(const RuntimeConfig& aConfig)
             RuntimeState::INITIALIZING,
             std::memory_order_acq_rel))
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::ALREADY_INITIALIZED,
             ErrorCategory::CORE,
             "Runtime is not in UNINITIALIZED state"
@@ -171,7 +171,7 @@ Status Runtime::run()
     RuntimeState lECurrentState = m_eState.load(std::memory_order_acquire);
     if (lECurrentState != RuntimeState::RUNNING)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::PRECONDITION_FAILED,
             ErrorCategory::CORE,
             "Runtime must be in RUNNING state to enter main loop"
@@ -352,7 +352,7 @@ Status Runtime::initAsmCore()
     ASTRA_LOG_INFO(LOG_TAG, "[init 2/6] Initialising ASM core (M-21)...");
     if (!astra::asm_core::selfTest())
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::INTERNAL_ERROR,
             ErrorCategory::ASM_CORE,
             "ASM core self-test failed"
@@ -405,7 +405,7 @@ Status Runtime::initCapabilityManager()
     if (!lRootResult.has_value())
     {
         m_capabilityManager.shutdown();
-        return std::unexpected(lRootResult.error());
+        return astra::unexpected(lRootResult.error());
     }
 
     m_rootCapToken = lRootResult.value();

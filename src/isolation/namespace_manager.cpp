@@ -126,7 +126,7 @@ Status NamespaceManager::setup(const SandboxProfile& aProfile,
     // namespace first. Catch this misconfiguration early.
     if (aProfile.m_nsFlags.m_bPid && !aProfile.m_nsFlags.m_bUser)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::ISOLATION,
             "PID namespace requires USER namespace for unprivileged operation"
@@ -236,7 +236,7 @@ Status NamespaceManager::createUserNamespace()
     if (::unshare(CLONE_NEWUSER) != 0)
     {
         int lIErrno = errno;
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NAMESPACE_SETUP_FAILED,
             ErrorCategory::ISOLATION,
             std::string("unshare(CLONE_NEWUSER) failed: ") + strerror(lIErrno)
@@ -337,7 +337,7 @@ Status NamespaceManager::createPidNamespace()
     if (::unshare(CLONE_NEWPID) != 0)
     {
         int lIErrno = errno;
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NAMESPACE_SETUP_FAILED,
             ErrorCategory::ISOLATION,
             std::string("unshare(CLONE_NEWPID) failed: ") + strerror(lIErrno)
@@ -375,7 +375,7 @@ Status NamespaceManager::openNsFd(const char* aSzNsName, ScopedFd& aFdOut)
     if (lIFd < 0)
     {
         int lIErrno = errno;
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NAMESPACE_SETUP_FAILED,
             ErrorCategory::ISOLATION,
             std::string("open(") + lSzPath + ") failed: " + strerror(lIErrno)
@@ -406,7 +406,7 @@ Status NamespaceManager::writeProcFile(const std::string& aSzPath,
     if (lIFd < 0)
     {
         int lIErrno = errno;
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NAMESPACE_SETUP_FAILED,
             ErrorCategory::ISOLATION,
             std::string("open(") + aSzPath + ") failed: " + strerror(lIErrno)
@@ -426,7 +426,7 @@ Status NamespaceManager::writeProcFile(const std::string& aSzPath,
     if (lIWritten < 0)
     {
         int lIErrno = errno;
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NAMESPACE_SETUP_FAILED,
             ErrorCategory::ISOLATION,
             std::string("write(") + aSzPath + ") failed: " + strerror(lIErrno)
@@ -435,7 +435,7 @@ Status NamespaceManager::writeProcFile(const std::string& aSzPath,
 
     if (static_cast<SizeT>(lIWritten) != aSzContent.size())
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NAMESPACE_SETUP_FAILED,
             ErrorCategory::ISOLATION,
             std::string("partial write to ") + aSzPath

@@ -71,7 +71,7 @@ Status ProcessManager::init(U32 aUMaxProcesses)
 {
     if (m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::ALREADY_INITIALIZED,
             ErrorCategory::CORE,
             "ProcessManager already initialised"
@@ -86,7 +86,7 @@ Status ProcessManager::init(U32 aUMaxProcesses)
     m_pProcessPool = new (std::nothrow) ProcessDescriptor[aUMaxProcesses];
     if (m_pProcessPool == nullptr)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::OUT_OF_MEMORY,
             ErrorCategory::CORE,
             "Failed to allocate process descriptor pool"
@@ -259,7 +259,7 @@ Result<ProcessId> ProcessManager::spawn(const ProcessConfig& aConfig)
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "ProcessManager not initialised"
@@ -271,7 +271,7 @@ Result<ProcessId> ProcessManager::spawn(const ProcessConfig& aConfig)
     {
         ASTRA_LOG_SEC_ALERT(LOG_TAG,
             "Process spawn denied: token lacks PROC_SPAWN permission");
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::PERMISSION_DENIED,
             ErrorCategory::CORE,
             "Capability token does not have PROC_SPAWN permission"
@@ -284,7 +284,7 @@ Result<ProcessId> ProcessManager::spawn(const ProcessConfig& aConfig)
     if (!lSlotResult.has_value())
     {
         releaseSpinlock();
-        return std::unexpected(lSlotResult.error());
+        return astra::unexpected(lSlotResult.error());
     }
 
     U32 lUSlot = lSlotResult.value();
@@ -323,7 +323,7 @@ Result<ProcessId> ProcessManager::spawn(const ProcessConfig& aConfig)
         ASTRA_LOG_ERROR(LOG_TAG, "PRE_SPAWN hook failed for process [%llu]",
                         static_cast<unsigned long long>(lUPid));
         lDesc.m_eState.store(ProcessState::CRASHED, std::memory_order_release);
-        return std::unexpected(lPreSpawnStatus.error());
+        return astra::unexpected(lPreSpawnStatus.error());
     }
 
     // Try legacy isolation hook if no hooks registered yet (backward compat)
@@ -335,7 +335,7 @@ Result<ProcessId> ProcessManager::spawn(const ProcessConfig& aConfig)
             ASTRA_LOG_ERROR(LOG_TAG, "Isolation hook failed for process [%llu]",
                             static_cast<unsigned long long>(lUPid));
             lDesc.m_eState.store(ProcessState::CRASHED, std::memory_order_release);
-            return std::unexpected(lIsoStatus.error());
+            return astra::unexpected(lIsoStatus.error());
         }
     }
 
@@ -346,7 +346,7 @@ Result<ProcessId> ProcessManager::spawn(const ProcessConfig& aConfig)
         ASTRA_LOG_ERROR(LOG_TAG, "fork() failed for process [%llu]: %s",
                         static_cast<unsigned long long>(lUPid), strerror(errno));
         lDesc.m_eState.store(ProcessState::CRASHED, std::memory_order_release);
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::INTERNAL_ERROR,
             ErrorCategory::CORE,
             "fork() failed"
@@ -435,7 +435,7 @@ Status ProcessManager::kill(ProcessId aUPid, I32 aISignal)
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "ProcessManager not initialised"
@@ -445,7 +445,7 @@ Status ProcessManager::kill(ProcessId aUPid, I32 aISignal)
     U32 lUSlot = pidToSlotIndex(aUPid);
     if (lUSlot >= m_uMaxProcesses)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_FOUND,
             ErrorCategory::CORE,
             "Process not found"
@@ -455,7 +455,7 @@ Status ProcessManager::kill(ProcessId aUPid, I32 aISignal)
     ProcessDescriptor& lDesc = m_pProcessPool[lUSlot];
     if (!lDesc.isAlive())
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::PRECONDITION_FAILED,
             ErrorCategory::CORE,
             "Process is not alive"
@@ -464,7 +464,7 @@ Status ProcessManager::kill(ProcessId aUPid, I32 aISignal)
 
     if (lDesc.m_iPlatformPid <= 0)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::PRECONDITION_FAILED,
             ErrorCategory::CORE,
             "Process does not have a valid platform PID"
@@ -503,7 +503,7 @@ Status ProcessManager::suspend(ProcessId aUPid)
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "ProcessManager not initialised"
@@ -513,7 +513,7 @@ Status ProcessManager::suspend(ProcessId aUPid)
     U32 lUSlot = pidToSlotIndex(aUPid);
     if (lUSlot >= m_uMaxProcesses)
     {
-        return std::unexpected(makeError(ErrorCode::NOT_FOUND, ErrorCategory::CORE, "Process not found"));
+        return astra::unexpected(makeError(ErrorCode::NOT_FOUND, ErrorCategory::CORE, "Process not found"));
     }
 
     ProcessDescriptor& lDesc = m_pProcessPool[lUSlot];
@@ -521,7 +521,7 @@ Status ProcessManager::suspend(ProcessId aUPid)
     if (!lDesc.m_eState.compare_exchange_strong(
             lEExpected, ProcessState::SUSPENDED, std::memory_order_acq_rel))
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::PRECONDITION_FAILED,
             ErrorCategory::CORE,
             "Process is not in RUNNING state"
@@ -547,7 +547,7 @@ Status ProcessManager::resume(ProcessId aUPid)
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "ProcessManager not initialised"
@@ -557,7 +557,7 @@ Status ProcessManager::resume(ProcessId aUPid)
     U32 lUSlot = pidToSlotIndex(aUPid);
     if (lUSlot >= m_uMaxProcesses)
     {
-        return std::unexpected(makeError(ErrorCode::NOT_FOUND, ErrorCategory::CORE, "Process not found"));
+        return astra::unexpected(makeError(ErrorCode::NOT_FOUND, ErrorCategory::CORE, "Process not found"));
     }
 
     ProcessDescriptor& lDesc = m_pProcessPool[lUSlot];
@@ -565,7 +565,7 @@ Status ProcessManager::resume(ProcessId aUPid)
     if (!lDesc.m_eState.compare_exchange_strong(
             lEExpected, ProcessState::RUNNING, std::memory_order_acq_rel))
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::PRECONDITION_FAILED,
             ErrorCategory::CORE,
             "Process is not in SUSPENDED state"
@@ -800,7 +800,7 @@ Result<U32> ProcessManager::findFreeSlot() const
         }
     }
 
-    return std::unexpected(makeError(
+    return astra::unexpected(makeError(
         ErrorCode::RESOURCE_EXHAUSTED,
         ErrorCategory::CORE,
         "Process pool is full"

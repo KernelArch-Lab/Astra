@@ -33,7 +33,7 @@ Status HookChain::registerHook(const HookEntry& aEntry)
 {
     if (m_uCount >= MAX_HOOKS_PER_POINT)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::RESOURCE_EXHAUSTED,
             ErrorCategory::CORE,
             "Hook chain is full (max hooks exceeded)"
@@ -148,7 +148,7 @@ Status HookRegistry::registerHook(HookPoint aEPoint, const HookEntry& aEntry)
 {
     if (static_cast<U8>(aEPoint) >= static_cast<U8>(HookPoint::HOOK_POINT_COUNT))
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::CORE,
             "Invalid HookPoint value"
@@ -174,7 +174,7 @@ Status HookRegistry::execute(HookPoint aEPoint, ProcessId aUPid, const Isolation
 {
     if (static_cast<U8>(aEPoint) >= static_cast<U8>(HookPoint::HOOK_POINT_COUNT))
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::CORE,
             "Invalid HookPoint value"

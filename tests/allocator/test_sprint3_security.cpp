@@ -229,8 +229,8 @@ static void test_audit_unregister()
     int lICoreCount = 0;
     int lIIpcCount = 0;
 
-    auditor.registerHook(ModuleId::CORE, [&](const AuditEvent&) { ++lICoreCount; });
-    auditor.registerHook(ModuleId::IPC, [&](const AuditEvent&) { ++lIIpcCount; });
+    (void)auditor.registerHook(ModuleId::CORE, [&](const AuditEvent&) { ++lICoreCount; });
+    (void)auditor.registerHook(ModuleId::IPC, [&](const AuditEvent&) { ++lIIpcCount; });
 
     auditor.emit(AuditEvent{AuditEventType::ALLOC, ModuleId::CORE, 32, 64, AllocTier::SMALL, nullptr, 0});
     CHECK(lICoreCount == 1, "core hook fired");
@@ -282,7 +282,7 @@ static void test_integrated_pipeline()
 
     AllocAuditor auditor;
     std::vector<AuditEvent> lLog;
-    auditor.registerHook(ModuleId::CORE, [&](const AuditEvent& e) {
+    (void)auditor.registerHook(ModuleId::CORE, [&](const AuditEvent& e) {
         lLog.push_back(e);
     });
 
@@ -432,7 +432,7 @@ static void test_quota_reset()
     QuotaManager qm;
 
     qm.setQuota(ModuleId::IPC, 1024);
-    qm.tryReserve(ModuleId::IPC, 500);
+    (void)qm.tryReserve(ModuleId::IPC, 500);
 
     // Remove quota
     qm.removeQuota(ModuleId::IPC);
@@ -462,7 +462,7 @@ static void test_audit_clear()
     AllocAuditor auditor;
 
     int lICount = 0;
-    auditor.registerHook(ModuleId::CORE, [&](const AuditEvent&) { ++lICount; });
+    (void)auditor.registerHook(ModuleId::CORE, [&](const AuditEvent&) { ++lICount; });
 
     auditor.emit(AuditEvent{AuditEventType::ALLOC, ModuleId::CORE, 0, 0, AllocTier::NONE, nullptr, 0});
     CHECK(lICount == 1, "hook fires before clear");
@@ -475,7 +475,7 @@ static void test_audit_clear()
 
     // Re-register
     int lINew = 0;
-    auditor.registerHook(ModuleId::IPC, [&](const AuditEvent&) { ++lINew; });
+    (void)auditor.registerHook(ModuleId::IPC, [&](const AuditEvent&) { ++lINew; });
     auditor.emit(AuditEvent{AuditEventType::FREE, ModuleId::IPC, 0, 0, AllocTier::NONE, nullptr, 0});
     CHECK(lINew == 1, "new hook fires after re-register");
 }
@@ -519,7 +519,7 @@ static void test_scalability_gated()
 
     AllocAuditor auditor;
     std::atomic<U64> lUAuditCount{0};
-    auditor.registerHook(ModuleId::CORE, [&](const AuditEvent&) {
+    (void)auditor.registerHook(ModuleId::CORE, [&](const AuditEvent&) {
         ++lUAuditCount;
     });
 
@@ -571,7 +571,7 @@ static void test_new_audit_event_types()
 
     AllocAuditor auditor;
     std::vector<AuditEvent> lLog;
-    auditor.registerHook(ModuleId::CORE, [&](const AuditEvent& e) {
+    (void)auditor.registerHook(ModuleId::CORE, [&](const AuditEvent& e) {
         lLog.push_back(e);
     });
 
@@ -613,7 +613,7 @@ static void test_quota_underflow_tracking()
     QuotaManager qm;
 
     qm.setQuota(ModuleId::IPC, 1024);
-    qm.tryReserve(ModuleId::IPC, 100);
+    (void)qm.tryReserve(ModuleId::IPC, 100);
 
     // Normal release — no underflow
     qm.release(ModuleId::IPC, 50);

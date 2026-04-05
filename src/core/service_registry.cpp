@@ -56,7 +56,7 @@ Status ServiceRegistry::init(U32 aUMaxServices)
 {
     if (m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::ALREADY_INITIALIZED,
             ErrorCategory::CORE,
             "ServiceRegistry already initialised"
@@ -71,7 +71,7 @@ Status ServiceRegistry::init(U32 aUMaxServices)
     m_pSlots = new (std::nothrow) ServiceSlot[aUMaxServices];
     if (m_pSlots == nullptr)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::OUT_OF_MEMORY,
             ErrorCategory::CORE,
             "Failed to allocate service slots"
@@ -149,7 +149,7 @@ Result<ServiceHandle> ServiceRegistry::registerService(
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "ServiceRegistry not initialised"
@@ -158,7 +158,7 @@ Result<ServiceHandle> ServiceRegistry::registerService(
 
     if (aPService == nullptr)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::CORE,
             "Service pointer is null"
@@ -170,7 +170,7 @@ Result<ServiceHandle> ServiceRegistry::registerService(
     {
         ASTRA_LOG_SEC_ALERT(LOG_TAG,
             "Service registration denied: token lacks SVC_REGISTER permission");
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::PERMISSION_DENIED,
             ErrorCategory::CORE,
             "Capability token does not have SVC_REGISTER permission"
@@ -188,7 +188,7 @@ Result<ServiceHandle> ServiceRegistry::registerService(
             m_pSlots[lUIdx].m_handle.m_szName == lSzName)
         {
             releaseSpinlock();
-            return std::unexpected(makeError(
+            return astra::unexpected(makeError(
                 ErrorCode::ALREADY_EXISTS,
                 ErrorCategory::CORE,
                 "A service with this name is already registered"
@@ -201,7 +201,7 @@ Result<ServiceHandle> ServiceRegistry::registerService(
     if (!lSlotResult.has_value())
     {
         releaseSpinlock();
-        return std::unexpected(lSlotResult.error());
+        return astra::unexpected(lSlotResult.error());
     }
 
     U32 lUSlot = lSlotResult.value();
@@ -249,7 +249,7 @@ Status ServiceRegistry::unregisterService(
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "ServiceRegistry not initialised"
@@ -258,7 +258,7 @@ Status ServiceRegistry::unregisterService(
 
     if (!hasPermission(aCapToken.m_ePermissions, Permission::SVC_UNREGISTER))
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::PERMISSION_DENIED,
             ErrorCategory::CORE,
             "Capability token does not have SVC_UNREGISTER permission"
@@ -268,7 +268,7 @@ Status ServiceRegistry::unregisterService(
     U32 lUSlot = idToSlotIndex(aUId);
     if (lUSlot >= m_uMaxServices)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_FOUND,
             ErrorCategory::CORE,
             "Invalid service ID"
@@ -281,7 +281,7 @@ Status ServiceRegistry::unregisterService(
     if (lEState == ServiceState::UNREGISTERED)
     {
         releaseSpinlock();
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_FOUND,
             ErrorCategory::CORE,
             "Service is not registered"
@@ -328,7 +328,7 @@ Result<ServiceHandle> ServiceRegistry::lookupById(ServiceId aUId) const
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "ServiceRegistry not initialised"
@@ -338,7 +338,7 @@ Result<ServiceHandle> ServiceRegistry::lookupById(ServiceId aUId) const
     U32 lUSlot = idToSlotIndex(aUId);
     if (lUSlot >= m_uMaxServices)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_FOUND,
             ErrorCategory::CORE,
             "Invalid service ID"
@@ -347,7 +347,7 @@ Result<ServiceHandle> ServiceRegistry::lookupById(ServiceId aUId) const
 
     if (m_pSlots[lUSlot].m_eState.load(std::memory_order_acquire) == ServiceState::UNREGISTERED)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_FOUND,
             ErrorCategory::CORE,
             "Service not found"
@@ -366,7 +366,7 @@ Result<ServiceHandle> ServiceRegistry::lookupByName(std::string_view aSzName) co
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "ServiceRegistry not initialised"
@@ -382,7 +382,7 @@ Result<ServiceHandle> ServiceRegistry::lookupByName(std::string_view aSzName) co
         }
     }
 
-    return std::unexpected(makeError(
+    return astra::unexpected(makeError(
         ErrorCode::NOT_FOUND,
         ErrorCategory::CORE,
         "Service not found by name"
@@ -398,7 +398,7 @@ Result<ServiceHandle> ServiceRegistry::lookupByModule(ModuleId aEModuleId) const
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "ServiceRegistry not initialised"
@@ -414,7 +414,7 @@ Result<ServiceHandle> ServiceRegistry::lookupByModule(ModuleId aEModuleId) const
         }
     }
 
-    return std::unexpected(makeError(
+    return astra::unexpected(makeError(
         ErrorCode::NOT_FOUND,
         ErrorCategory::CORE,
         "Service not found by module ID"
@@ -456,7 +456,7 @@ Status ServiceRegistry::startAll()
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "ServiceRegistry not initialised"
@@ -471,7 +471,7 @@ Status ServiceRegistry::startAll()
     if (!lSortResult.has_value())
     {
         ASTRA_LOG_ERROR(LOG_TAG, "Topological sort failed (cycle detected?)");
-        return std::unexpected(lSortResult.error());
+        return astra::unexpected(lSortResult.error());
     }
 
     const std::vector<U32>& lVStartOrder = lSortResult.value();
@@ -667,7 +667,7 @@ Result<U32> ServiceRegistry::findFreeSlot() const
         }
     }
 
-    return std::unexpected(makeError(
+    return astra::unexpected(makeError(
         ErrorCode::RESOURCE_EXHAUSTED,
         ErrorCategory::CORE,
         "Service registry is full"
@@ -809,7 +809,7 @@ Result<std::vector<U32>> ServiceRegistry::topologicalSort() const
     {
         ASTRA_LOG_ERROR(LOG_TAG, "Dependency cycle detected: processed %zu/%u services",
                         lVResult.size(), lURegisteredCount);
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::PRECONDITION_FAILED,
             ErrorCategory::CORE,
             "Service dependency cycle detected"

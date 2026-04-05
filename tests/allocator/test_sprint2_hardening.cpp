@@ -21,7 +21,7 @@
 // On g++11, compile with: -isystem /path/to/shim  (provides <expected>)
 // The shim maps std::unexpected() to a free function returning
 // std::_unexpected_storage<E>, which is ABI-compatible with how
-// result.h uses std::unexpected(Error{...}).
+// result.h uses astra::unexpected(Error{...}).
 // ---------------------------------------------------------------------------
 #include <astra/allocator/pool_allocator.h>
 #include <astra/allocator/memory_manager.h>
@@ -56,7 +56,7 @@ static void test_alloc_poison_fill()
 {
     std::printf("\n\033[1;34m=== 1. Alloc poison fill (0xAB) ===\033[0m\n");
     TestPool pool;
-    pool.init();
+    (void)pool.init();
 
     U8* lPBlock = static_cast<U8*>(pool.allocate());
     CHECK(lPBlock != nullptr, "allocation succeeds");
@@ -87,7 +87,7 @@ static void test_free_poison_fill()
 {
     std::printf("\n\033[1;34m=== 2. Free poison fill (0xDE) ===\033[0m\n");
     TestPool pool;
-    pool.init();
+    (void)pool.init();
 
     U8* lPBlock = static_cast<U8*>(pool.allocate());
     auto lResult = pool.deallocate(lPBlock);
@@ -117,7 +117,7 @@ static void test_double_free()
 {
     std::printf("\n\033[1;34m=== 3. Double-free detection ===\033[0m\n");
     TestPool pool;
-    pool.init();
+    (void)pool.init();
 
     void* lPBlock = pool.allocate();
     auto lResult1 = pool.deallocate(lPBlock);
@@ -145,7 +145,7 @@ static void test_foreign_pointer()
 {
     std::printf("\n\033[1;34m=== 4. Foreign pointer rejection ===\033[0m\n");
     TestPool pool;
-    pool.init();
+    (void)pool.init();
 
     // Stack pointer — definitely not from the pool
     U8 lStackBuf[64];
@@ -175,7 +175,7 @@ static void test_corruption_detection()
 {
     std::printf("\n\033[1;34m=== 5. Corruption detection ===\033[0m\n");
     TestPool pool;
-    pool.init();
+    (void)pool.init();
 
     // Allocate and free a block to make it the freelist head
     void* lPFirst = pool.allocate();
@@ -202,7 +202,7 @@ static void test_status_markers()
 {
     std::printf("\n\033[1;34m=== 6. Status marker API ===\033[0m\n");
     TestPool pool;
-    pool.init();
+    (void)pool.init();
 
     void* lPBlock = pool.allocate();
     CHECK(pool.getBlockStatus(lPBlock) == poison::ALLOC_MARKER, "allocated block has ALLOC_MARKER");
@@ -225,7 +225,7 @@ static void test_freelist_validation()
 {
     std::printf("\n\033[1;34m=== 7. Freelist validation ===\033[0m\n");
     TestPool pool;
-    pool.init();
+    (void)pool.init();
 
     // All 16 blocks free
     CHECK(pool.validateFreeList() == 16, "all 16 blocks on freelist after init");
@@ -266,7 +266,7 @@ static void test_manager_dealloc_status()
 {
     std::printf("\n\033[1;34m=== 9. MemoryManager DeallocStatus propagation ===\033[0m\n");
     MemoryManager mgr;
-    mgr.init();
+    (void)mgr.init();
 
     // Normal alloc/free
     void* lP = mgr.allocate(32);
@@ -296,7 +296,7 @@ static void test_manager_health()
 {
     std::printf("\n\033[1;34m=== 10. MemoryManager health check ===\033[0m\n");
     MemoryManager mgr;
-    mgr.init();
+    (void)mgr.init();
 
     CHECK(mgr.isHealthy(), "fresh manager is healthy");
     CHECK(mgr.validateAllFreeLists(), "all freelists valid initially");
@@ -322,7 +322,7 @@ static void test_concurrent_hardening()
 {
     std::printf("\n\033[1;34m=== 11. Concurrent: 4 threads, hardening active ===\033[0m\n");
     MemoryManager mgr;
-    mgr.init();
+    (void)mgr.init();
 
     std::atomic<int> lIErrors{0};
     constexpr int ITERS = 500;
@@ -386,7 +386,7 @@ static void test_cross_tier_double_free()
 {
     std::printf("\n\033[1;34m=== 12. Cross-tier double-free via manager ===\033[0m\n");
     MemoryManager mgr;
-    mgr.init();
+    (void)mgr.init();
 
     void* lPSmall  = mgr.allocate(32);
     void* lPMedium = mgr.allocate(200);
@@ -417,7 +417,7 @@ static void test_alloc_free_alloc_cycle()
 {
     std::printf("\n\033[1;34m=== 13. Alloc-free-alloc poison cycle ===\033[0m\n");
     TestPool pool;
-    pool.init();
+    (void)pool.init();
 
     // Allocate and write real data
     U8* lP = static_cast<U8*>(pool.allocate());
@@ -455,7 +455,7 @@ static void test_status_marker_tamper()
 {
     std::printf("\n\033[1;34m=== 14. Status marker tamper detection ===\033[0m\n");
     TestPool pool;
-    pool.init();
+    (void)pool.init();
 
     // Allocate a block, then tamper with its status marker
     U8* lPBlock = static_cast<U8*>(pool.allocate());
@@ -482,7 +482,7 @@ static void test_exhaustion_sprint2()
     std::printf("\n\033[1;34m=== 15. Exhaustion + recovery with hardening ===\033[0m\n");
     using TinyPool = PoolAllocator<64, 4>;
     TinyPool pool;
-    pool.init();
+    (void)pool.init();
 
     void* lPtrs[4];
     for (int i = 0; i < 4; ++i)
@@ -524,7 +524,7 @@ static void test_scalability_sprint2()
 {
     std::printf("\n\033[1;34m=== 16. 10K cycles with health validation ===\033[0m\n");
     MemoryManager mgr;
-    mgr.init();
+    (void)mgr.init();
 
     auto lStart = std::chrono::high_resolution_clock::now();
 

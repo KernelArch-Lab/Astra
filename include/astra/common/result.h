@@ -13,20 +13,37 @@
 #include <string_view>
 
 // ---------------------------------------------------------------------------
-// std::expected polyfill for GCC < 12 / libstdc++ without <expected>
-// Provides the minimal subset Astra actually uses: value/error access,
-// implicit T construction, and std::unexpected construction.
-// Replace with #include <expected> once the toolchain is GCC 13+.
+// std::expected / std::unexpected support
+//
+// GCC 12+ and Clang 16+ ship <expected>.  GCC 11 does NOT, and its
+// <exception> header still declares the legacy  void std::unexpected()
+// which makes injecting a class template into namespace std impossible.
+//
+// Strategy:
+//   - When <expected> exists: include it, pull the names into astra::.
+//   - Otherwise:              provide a minimal polyfill in astra::.
+//
+// The rest of the Astra codebase uses astra::unexpected / astra::Result /
+// astra::Status exclusively — never raw std::expected.
+// Replace the polyfill branch once GCC 13+ is the minimum toolchain.
 // ---------------------------------------------------------------------------
 #if __has_include(<expected>)
 #include <expected>
-#else
+#endif
 
 #include <variant>
 #include <utility>
 
-namespace std
+namespace astra
 {
+
+// ----- unexpected ----------------------------------------------------------
+#if __has_include(<expected>)
+
+template <typename E>
+using unexpected = std::unexpected<E>;
+
+#else
 
 template <typename E>
 class unexpected
@@ -43,6 +60,16 @@ private:
 template <typename E>
 unexpected(E) -> unexpected<E>;
 
+#endif // unexpected
+
+// ----- expected<T,E> -------------------------------------------------------
+#if __has_include(<expected>)
+
+template <typename T, typename E>
+using expected = std::expected<T, E>;
+
+#else
+
 template <typename T, typename E>
 class expected
 {
@@ -52,7 +79,7 @@ public:
     constexpr expected(const T& aVal) noexcept : m_data(aVal) {}
     constexpr expected(T&& aVal) noexcept : m_data(std::move(aVal)) {}
 
-    // Error constructor via std::unexpected
+    // Error constructor via astra::unexpected
     constexpr expected(const unexpected<E>& aUnex) noexcept
         : m_data(aUnex.error()) {}
     constexpr expected(unexpected<E>&& aUnex) noexcept
@@ -100,12 +127,7 @@ private:
     bool m_bHasValue;
 };
 
-} // namespace std
-
-#endif // __has_include(<expected>)
-
-namespace astra
-{
+#endif // expected
 
 // -------------------------------------------------------------------------
 // Error category - which subsystem produced this error
@@ -231,15 +253,15 @@ private:
 //   Result<int> doWork()
 //   {
 //       if (failed)
-//           return std::unexpected(Error{ErrorCode::INTERNAL_ERROR, ...});
+//           return astra::unexpected(Error{ErrorCode::INTERNAL_ERROR, ...});
 //       return 42;
 //   }
 // -------------------------------------------------------------------------
 template <typename T>
-using Result = std::expected<T, Error>;
+using Result = astra::expected<T, Error>;
 
 // Convenience alias for operations that return nothing on success
-using Status = std::expected<void, Error>;
+using Status = astra::expected<void, Error>;
 
 // -------------------------------------------------------------------------
 // Helper to create errors quickly

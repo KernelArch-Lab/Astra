@@ -60,7 +60,7 @@ Status failing_hook(ProcessId aUPid, const IsolationProfile& aProfile)
 {
     (void)aUPid;
     (void)aProfile;
-    return std::unexpected(makeError(
+    return astra::unexpected(makeError(
         ErrorCode::INTERNAL_ERROR,
         ErrorCategory::CORE,
         "Intentional hook failure"

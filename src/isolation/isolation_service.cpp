@@ -63,7 +63,7 @@ Status IsolationService::onInit()
 {
     if (m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::ALREADY_INITIALIZED,
             ErrorCategory::ISOLATION,
             "IsolationService::onInit() called twice"
@@ -98,7 +98,7 @@ Status IsolationService::onStart()
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::ISOLATION,
             "IsolationService::onStart() before onInit()"
@@ -165,7 +165,7 @@ Status IsolationService::applyIsolation(ProcessId                       aUPid,
 {
     if (!m_bInitialised || !m_pProfileEngine)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::ISOLATION,
             "IsolationService not ready"
@@ -179,7 +179,7 @@ Status IsolationService::applyIsolation(ProcessId                       aUPid,
     Result<const SandboxProfile*> lResultProfile = m_pProfileEngine->getProfile(lEType);
     if (!lResultProfile.has_value())
     {
-        return std::unexpected(lResultProfile.error());
+        return astra::unexpected(lResultProfile.error());
     }
     const SandboxProfile* lPProfile = lResultProfile.value();
 

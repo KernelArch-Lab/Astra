@@ -40,7 +40,7 @@ Status ProfileEngine::init()
     // Guard against double-init
     if (m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::ALREADY_INITIALIZED,
             ErrorCategory::ISOLATION,
             "ProfileEngine::init() called twice"
@@ -81,7 +81,7 @@ Result<const SandboxProfile*> ProfileEngine::getProfile(ProfileType aEType) cons
     // Guard: must be initialised
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::ISOLATION,
             "ProfileEngine::getProfile() called before init()"
@@ -91,7 +91,7 @@ Result<const SandboxProfile*> ProfileEngine::getProfile(ProfileType aEType) cons
     // Guard: CUSTOM is not stored here — caller must use validateCustomProfile()
     if (aEType == ProfileType::CUSTOM)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::ISOLATION,
             "Use validateCustomProfile() for custom profiles"
@@ -105,7 +105,7 @@ Result<const SandboxProfile*> ProfileEngine::getProfile(ProfileType aEType) cons
     // but we double-check against BUILTIN_PROFILE_COUNT defensively.
     if (lUIdx >= BUILTIN_PROFILE_COUNT)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::ISOLATION,
             "ProfileType index out of bounds"
@@ -131,7 +131,7 @@ Result<SandboxProfile> ProfileEngine::validateCustomProfile(
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::ISOLATION,
             "ProfileEngine not initialised"
@@ -142,7 +142,7 @@ Result<SandboxProfile> ProfileEngine::validateCustomProfile(
     if (aProfile.m_limits.m_uCpuMaxPermille == 0
      || aProfile.m_limits.m_uCpuMaxPermille > 1000)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::ISOLATION,
             "Custom profile: m_uCpuMaxPermille must be 1-1000"
@@ -153,7 +153,7 @@ Result<SandboxProfile> ProfileEngine::validateCustomProfile(
     // (it is the foundation for every other namespace)
     if (!aProfile.m_nsFlags.m_bUser)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::ISOLATION,
             "Custom profile: USER namespace must be enabled"

@@ -180,7 +180,7 @@ public:
     {
         if (m_bInitialised)
         {
-            return std::unexpected(makeError(
+            return astra::unexpected(makeError(
                 ErrorCode::ALREADY_INITIALIZED,
                 ErrorCategory::ALLOCATOR,
                 "PoolAllocator already initialised"
@@ -196,7 +196,7 @@ public:
 
         if (m_pArena == nullptr)
         {
-            return std::unexpected(makeError(
+            return astra::unexpected(makeError(
                 ErrorCode::OUT_OF_MEMORY,
                 ErrorCategory::ALLOCATOR,
                 "Failed to allocate pool arena"

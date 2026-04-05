@@ -56,7 +56,7 @@ Status CapabilityManager::init(U32 aUMaxTokens)
 {
     if (m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::ALREADY_INITIALIZED,
             ErrorCategory::CORE,
             "CapabilityManager already initialised"
@@ -72,7 +72,7 @@ Status CapabilityManager::init(U32 aUMaxTokens)
     m_pTokenPool = new (std::nothrow) TokenSlot[aUMaxTokens];
     if (m_pTokenPool == nullptr)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::OUT_OF_MEMORY,
             ErrorCategory::CORE,
             "Failed to allocate token pool"
@@ -135,7 +135,7 @@ Result<CapabilityToken> CapabilityManager::create(Permission aEPerms, U64 aUOwne
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "CapabilityManager not initialised"
@@ -149,7 +149,7 @@ Result<CapabilityToken> CapabilityManager::create(Permission aEPerms, U64 aUOwne
     if (!lSlotResult.has_value())
     {
         releaseSpinlock();
-        return std::unexpected(lSlotResult.error());
+        return astra::unexpected(lSlotResult.error());
     }
 
     U32 lUSlot = lSlotResult.value();
@@ -198,7 +198,7 @@ Result<CapabilityToken> CapabilityManager::derive(
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "CapabilityManager not initialised"
@@ -208,7 +208,7 @@ Result<CapabilityToken> CapabilityManager::derive(
     // Validate the parent token first
     if (!validate(aParent))
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::CAPABILITY_INVALID,
             ErrorCategory::CORE,
             "Parent token is invalid or revoked"
@@ -224,7 +224,7 @@ Result<CapabilityToken> CapabilityManager::derive(
             static_cast<unsigned long long>(static_cast<U64>(aEChildPerms)),
             static_cast<unsigned long long>(static_cast<U64>(aParent.m_ePermissions)));
 
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::PERMISSION_DENIED,
             ErrorCategory::CORE,
             "Child permissions must be a subset of parent permissions"
@@ -237,7 +237,7 @@ Result<CapabilityToken> CapabilityManager::derive(
     if (!lSlotResult.has_value())
     {
         releaseSpinlock();
-        return std::unexpected(lSlotResult.error());
+        return astra::unexpected(lSlotResult.error());
     }
 
     U32 lUSlot = lSlotResult.value();
@@ -327,7 +327,7 @@ Result<U32> CapabilityManager::revoke(const CapabilityToken& aToken)
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "CapabilityManager not initialised"
@@ -439,7 +439,7 @@ Result<U32> CapabilityManager::findFreeSlot() const
         }
     }
 
-    return std::unexpected(makeError(
+    return astra::unexpected(makeError(
         ErrorCode::RESOURCE_EXHAUSTED,
         ErrorCategory::CORE,
         "Token pool is full"

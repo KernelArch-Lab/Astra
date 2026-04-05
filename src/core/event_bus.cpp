@@ -66,7 +66,7 @@ Status EventBus::init(U32 aURingSize)
 {
     if (m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::ALREADY_INITIALIZED,
             ErrorCategory::CORE,
             "EventBus already initialised"
@@ -90,7 +90,7 @@ Status EventBus::init(U32 aURingSize)
     m_pRingBuffer = new (std::nothrow) Event[aURingSize];
     if (m_pRingBuffer == nullptr)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::OUT_OF_MEMORY,
             ErrorCategory::CORE,
             "Failed to allocate event ring buffer"
@@ -163,7 +163,7 @@ Result<U32> EventBus::subscribe(
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::CORE,
             "EventBus not initialised"
@@ -172,7 +172,7 @@ Result<U32> EventBus::subscribe(
 
     if (m_uSubscriberCount >= MAX_SUBSCRIBERS)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::RESOURCE_EXHAUSTED,
             ErrorCategory::CORE,
             "Maximum number of event subscribers reached"
