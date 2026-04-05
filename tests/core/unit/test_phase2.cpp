@@ -249,6 +249,10 @@ void test_service_dependencies_simple()
     // Start with dependency ordering
     Status lStartStatus = lReg.startAll();
     test_assert(lStartStatus.has_value(), "All services started (dependency order respected)");
+
+    // Shutdown before TestService locals are destroyed to avoid
+    // pure-virtual calls in the ServiceRegistry destructor.
+    lReg.shutdown();
 }
 
 void test_service_no_dependencies()
@@ -273,6 +277,8 @@ void test_service_no_dependencies()
 
     Status lStartStatus = lReg.startAll();
     test_assert(lStartStatus.has_value(), "Services with no dependencies started successfully");
+
+    lReg.shutdown();
 }
 
 // ============================================================================
