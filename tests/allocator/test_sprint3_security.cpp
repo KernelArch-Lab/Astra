@@ -5,11 +5,11 @@
 // quota+cap integration, multi-module isolation, concurrent gated allocs.
 //
 // Build (standalone, C++17 on g++13+):
-//   g++ -std=c++17 -O2 -Wall -Wextra -I include -o test_sprint3 \
+//   g++ -std=c++17 -O2 -Wall -Wextra -I include -o test_sprint3
 //       tests/allocator/test_sprint3_security.cpp -lpthread
 //
 // Build (g++11 with shim):
-//   g++ -std=c++17 -O2 -Wall -Wextra -isystem /path/to/shim -I include \
+//   g++ -std=c++17 -O2 -Wall -Wextra -isystem /path/to/shim -I include
 //       -o test_sprint3 tests/allocator/test_sprint3_security.cpp -lpthread
 // ============================================================================
 #include <cstdio>

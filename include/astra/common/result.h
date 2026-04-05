@@ -9,9 +9,100 @@
 #define ASTRA_COMMON_RESULT_H
 
 #include <astra/common/types.h>
-#include <expected>
 #include <string>
 #include <string_view>
+
+// ---------------------------------------------------------------------------
+// std::expected polyfill for GCC < 12 / libstdc++ without <expected>
+// Provides the minimal subset Astra actually uses: value/error access,
+// implicit T construction, and std::unexpected construction.
+// Replace with #include <expected> once the toolchain is GCC 13+.
+// ---------------------------------------------------------------------------
+#if __has_include(<expected>)
+#include <expected>
+#else
+
+#include <variant>
+#include <utility>
+
+namespace std
+{
+
+template <typename E>
+class unexpected
+{
+public:
+    constexpr explicit unexpected(const E& aErr) noexcept : m_err(aErr) {}
+    constexpr explicit unexpected(E&& aErr) noexcept : m_err(std::move(aErr)) {}
+    constexpr const E& error() const& noexcept { return m_err; }
+    constexpr E&       error() &      noexcept { return m_err; }
+private:
+    E m_err;
+};
+
+template <typename E>
+unexpected(E) -> unexpected<E>;
+
+template <typename T, typename E>
+class expected
+{
+public:
+    // Success constructors
+    constexpr expected() noexcept : m_data(T{}) {}
+    constexpr expected(const T& aVal) noexcept : m_data(aVal) {}
+    constexpr expected(T&& aVal) noexcept : m_data(std::move(aVal)) {}
+
+    // Error constructor via std::unexpected
+    constexpr expected(const unexpected<E>& aUnex) noexcept
+        : m_data(aUnex.error()) {}
+    constexpr expected(unexpected<E>&& aUnex) noexcept
+        : m_data(std::move(aUnex.error())) {}
+
+    [[nodiscard]] constexpr bool has_value() const noexcept
+    {
+        return std::holds_alternative<T>(m_data);
+    }
+    constexpr explicit operator bool() const noexcept { return has_value(); }
+
+    constexpr const T& value() const& { return std::get<T>(m_data); }
+    constexpr T&       value() &      { return std::get<T>(m_data); }
+    constexpr const T& operator*() const& noexcept { return std::get<T>(m_data); }
+    constexpr T&       operator*() &      noexcept { return std::get<T>(m_data); }
+    constexpr const T* operator->() const noexcept { return &std::get<T>(m_data); }
+    constexpr T*       operator->()       noexcept { return &std::get<T>(m_data); }
+
+    constexpr const E& error() const& { return std::get<E>(m_data); }
+    constexpr E&       error() &      { return std::get<E>(m_data); }
+
+private:
+    std::variant<T, E> m_data;
+};
+
+// Partial specialisation for expected<void, E>
+template <typename E>
+class expected<void, E>
+{
+public:
+    constexpr expected() noexcept : m_err(), m_bHasValue(true) {}
+    constexpr expected(const unexpected<E>& aUnex) noexcept
+        : m_err(aUnex.error()), m_bHasValue(false) {}
+    constexpr expected(unexpected<E>&& aUnex) noexcept
+        : m_err(std::move(aUnex.error())), m_bHasValue(false) {}
+
+    [[nodiscard]] constexpr bool has_value() const noexcept { return m_bHasValue; }
+    constexpr explicit operator bool() const noexcept { return m_bHasValue; }
+
+    constexpr const E& error() const& { return m_err; }
+    constexpr E&       error() &      { return m_err; }
+
+private:
+    E    m_err;
+    bool m_bHasValue;
+};
+
+} // namespace std
+
+#endif // __has_include(<expected>)
 
 namespace astra
 {

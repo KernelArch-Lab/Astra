@@ -269,8 +269,8 @@ public:
     }
     MemoryStats stats() const noexcept {
         auto a=m_s.stats(), b=m_m.stats(), c=m_l.stats(), d=m_p.stats();
-        U64 mg = (U64)a.m_uBlockSize*a.m_uMaxBlocks + (U64)b.m_uBlockSize*b.m_uMaxBlocks
-               + (U64)c.m_uBlockSize*c.m_uMaxBlocks + (U64)d.m_uBlockSize*d.m_uMaxBlocks;
+        U64 mg = static_cast<U64>(a.m_uBlockSize)*a.m_uMaxBlocks + static_cast<U64>(b.m_uBlockSize)*b.m_uMaxBlocks
+               + static_cast<U64>(c.m_uBlockSize)*c.m_uMaxBlocks + static_cast<U64>(d.m_uBlockSize)*d.m_uMaxBlocks;
         U64 iu = a.m_uCurrentInUse*a.m_uBlockSize + b.m_uCurrentInUse*b.m_uBlockSize
                + c.m_uCurrentInUse*c.m_uBlockSize + d.m_uCurrentInUse*d.m_uBlockSize;
         return { a, b, c, d, mg, iu };
@@ -519,7 +519,7 @@ int main()
         TEST_ASSERT_EQ(s.m_uTotalAllocations, 100000u);
         TEST_ASSERT_EQ(s.m_uCurrentInUse, 0u);
         double rate = 100000.0 / (double(us) / 1e6);
-        printf("  \033[32m[PASS]\033[0m 100K cycles in %lld us (%.0f ops/sec)\n", (long long)us, rate);
+        printf("  \033[32m[PASS]\033[0m 100K cycles in %lld us (%.0f ops/sec)\n", static_cast<long long>(us), rate);
         pool.shutdown();
     }
 

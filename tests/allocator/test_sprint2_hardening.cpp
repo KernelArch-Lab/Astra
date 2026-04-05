@@ -6,7 +6,7 @@
 // MemoryManager diagnostics, concurrent hardening, status markers.
 //
 // Build (standalone, C++17):
-//   g++ -std=c++17 -O2 -Wall -Wextra -I include \
+//   g++ -std=c++17 -O2 -Wall -Wextra -I include
 //       -o test_sprint2 tests/allocator/test_sprint2_hardening.cpp -lpthread
 // ============================================================================
 #include <cstdio>
