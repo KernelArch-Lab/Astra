@@ -39,7 +39,8 @@
     #define ASTRA_COMPILER_GCC 1
     #define ASTRA_COMPILER_NAME "GCC"
     #if __GNUC__ < 13
-        #warning "Astra Runtime recommends GCC 13+ for full C++23 support."
+        // NOTE: Astra Runtime recommends GCC 13+ for full C++23 support.
+        // Builds on GCC 11/12 use the polyfill in common/result.h.
     #endif
 #else
     #error "Unsupported compiler. Use GCC 13+ or Clang 17+."

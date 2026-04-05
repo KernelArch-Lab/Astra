@@ -505,7 +505,7 @@ Status ServiceRegistry::startAll()
             lSlot.m_eState.store(ServiceState::FAILED, std::memory_order_release);
             ASTRA_LOG_ERROR(LOG_TAG, "  Service '%s' init FAILED: %s",
                            lSlot.m_handle.m_szName.c_str(),
-                           lInitStatus.error().m_szMessage);
+                           lInitStatus.error().message().data());
 
             if (m_fnServiceEvent)
             {
@@ -520,7 +520,7 @@ Status ServiceRegistry::startAll()
             lSlot.m_eState.store(ServiceState::FAILED, std::memory_order_release);
             ASTRA_LOG_ERROR(LOG_TAG, "  Service '%s' start FAILED: %s",
                            lSlot.m_handle.m_szName.c_str(),
-                           lStartStatus.error().m_szMessage);
+                           lStartStatus.error().message().data());
 
             if (m_fnServiceEvent)
             {
