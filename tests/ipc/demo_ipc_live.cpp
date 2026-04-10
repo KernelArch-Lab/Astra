@@ -249,11 +249,8 @@ int main()
 
     // Read the child's acknowledgement
     char lSzAck[512];
-    U64 lUReadIdx = lChannel.control()->m_read.m_uReadIndex.load(std::memory_order_acquire);
-    // The child wrote after all parent messages, so readIdx for ack starts after parent's writes
-    U64 lUAckReadIdx = lChannel.control()->m_write.m_uWriteIndex.load(std::memory_order_acquire);
 
-    // Actually, child wrote using writeMessage which advances the write index.
+    // Child wrote using writeMessage which advances the write index.
     // We need to read from where the parent left off writing (child's messages start there).
     // Since parent wrote 5 messages and child wrote 1 ack after, let's find it:
     // Use the parent's write position as our read start for the ack

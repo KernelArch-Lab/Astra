@@ -179,7 +179,14 @@ Status ProbeManager::loadOne(const std::filesystem::path& aBpfObjPath) noexcept
     // Open the BPF ELF object. This does NOT load it into the kernel yet.
     // libbpf parses the BTF info, map definitions, and program sections.
     // -----------------------------------------------------------------
+    // libbpf's DECLARE_LIBBPF_OPTS uses GNU statement expressions and C99
+    // compound literals internally — suppress Clang warnings for this macro.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wgnu-statement-expression-from-macro-expansion"
+#pragma clang diagnostic ignored "-Wc99-extensions"
+#pragma clang diagnostic ignored "-Wmissing-designated-field-initializers"
     DECLARE_LIBBPF_OPTS(bpf_object_open_opts, lOpenOpts);
+#pragma clang diagnostic pop
     bpf_object* lPObj = bpf_object__open_file(lSzPath.c_str(), &lOpenOpts);
     if (!lPObj || libbpf_get_error(lPObj))
     {
@@ -229,7 +236,7 @@ Status ProbeManager::loadOne(const std::filesystem::path& aBpfObjPath) noexcept
     struct bpf_program* lPProg = nullptr;
     bpf_object__for_each_program(lPProg, lPObj)
     {
-        struct bpf_link* lPLink = bpf_program__attach(lPProg);
+        ::bpf_link* lPLink = bpf_program__attach(lPProg);
         if (!lPLink || libbpf_get_error(lPLink))
         {
             LOG_WARN(g_logEbpf, "ProbeManager: failed to attach program "
@@ -254,7 +261,7 @@ Status ProbeManager::loadOne(const std::filesystem::path& aBpfObjPath) noexcept
 void ProbeManager::unloadAll() noexcept
 {
     // Destroy links first to cleanly detach probes before closing objects
-    for (struct bpf_link* lPLink : m_vAttachedLinks)
+    for (::bpf_link* lPLink : m_vAttachedLinks)
     {
         if (lPLink)
         {

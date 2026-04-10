@@ -47,9 +47,10 @@
 #include <thread>
 #include <vector>
 
-// Forward-declare the libbpf struct so consumers of this header do not
+// Forward-declare the libbpf structs so consumers of this header do not
 // need to pull in <bpf/libbpf.h> transitively.
 struct bpf_object;
+struct bpf_link;
 struct ring_buffer;
 
 namespace astra
@@ -158,7 +159,7 @@ private:
 
     // Flat list of attached BPF program links. Destroyed in unloadAll()
     // to cleanly detach probes before closing the objects.
-    std::vector<struct bpf_link*> m_vAttachedLinks;
+    std::vector<::bpf_link*> m_vAttachedLinks;
 
     // Root directory to scan for .bpf.o files
     std::filesystem::path m_probeDir;
