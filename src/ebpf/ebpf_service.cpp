@@ -178,15 +178,13 @@ Status ProbeManager::loadOne(const std::filesystem::path& aBpfObjPath) noexcept
     // -----------------------------------------------------------------
     // Open the BPF ELF object. This does NOT load it into the kernel yet.
     // libbpf parses the BTF info, map definitions, and program sections.
+    //
+    // NOTE: We avoid DECLARE_LIBBPF_OPTS / LIBBPF_OPTS here because the
+    // macro uses GNU statement expressions and C99 compound literals,
+    // which Clang rejects under -Werror. Manual zero-init is equivalent.
     // -----------------------------------------------------------------
-    // libbpf's DECLARE_LIBBPF_OPTS uses GNU statement expressions and C99
-    // compound literals internally — suppress Clang warnings for this macro.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wgnu-statement-expression-from-macro-expansion"
-#pragma clang diagnostic ignored "-Wc99-extensions"
-#pragma clang diagnostic ignored "-Wmissing-designated-field-initializers"
-    DECLARE_LIBBPF_OPTS(bpf_object_open_opts, lOpenOpts);
-#pragma clang diagnostic pop
+    struct bpf_object_open_opts lOpenOpts{};
+    lOpenOpts.sz = sizeof(lOpenOpts);
     bpf_object* lPObj = bpf_object__open_file(lSzPath.c_str(), &lOpenOpts);
     if (!lPObj || libbpf_get_error(lPObj))
     {
