@@ -252,7 +252,7 @@ public:
     }
 
 private:
-    core::Runtime&  m_rRuntime;
+    [[maybe_unused]] core::Runtime&  m_rRuntime;
     MemoryManager   m_memoryManager;
     QuotaManager    m_quotaManager;
     AllocAuditor    m_auditor;
