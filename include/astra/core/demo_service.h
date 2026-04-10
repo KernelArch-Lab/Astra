@@ -97,8 +97,11 @@ private:
     // Coloured output helpers
     static void printHeader(const char* aSzTitle);
     static void printStep(const char* aSzDescription);
+    __attribute__((format(printf, 1, 2)))
     static void printSuccess(const char* aSzFormat, ...);
+    __attribute__((format(printf, 1, 2)))
     static void printFailure(const char* aSzFormat, ...);
+    __attribute__((format(printf, 1, 2)))
     static void printInfo(const char* aSzFormat, ...);
     static void printSeparator();
 };
