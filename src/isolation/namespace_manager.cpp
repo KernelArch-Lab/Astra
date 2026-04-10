@@ -2,60 +2,88 @@
 // Astra Runtime - M-02 Isolation Layer
 // src/isolation/namespace_manager.cpp
 //
-// Implements NamespaceManager: USER namespace + PID namespace creation.
+// Implements NamespaceManager.
 //
-// KEY LINUX CONCEPTS used here (read before touching this file):
+// Sprint 1: USER namespace + PID namespace.
+// Sprint 2: adds MOUNT namespace (CLONE_NEWNS) + sandbox filesystem via
+//           mount(2) and pivot_root(2).
 //
-// unshare(flags):
-//   Disassociates the calling process from one or more namespaces and
-//   creates new ones. The process is now in the new namespace.
-//   Example: unshare(CLONE_NEWUSER) creates a new user namespace and
-//   puts the calling process into it.
+// ── KEY LINUX CONCEPTS ADDED IN SPRINT 2 ────────────────────────────────────
 //
-// uid_map / gid_map:
-//   After creating a user namespace, you MUST write these files in
-//   /proc/<pid>/uid_map and /proc/<pid>/gid_map. They tell the kernel
-//   how to translate UIDs between "inside the namespace" and "outside".
-//   Format: "<inside_uid> <outside_uid> <count>"
-//   We write: "0 65534 1" which means:
-//     - Inside UID 0 (root) maps to outside UID 65534 (nobody)
-//     - count=1 means only this one mapping
+// CLONE_NEWNS (mount namespace):
+//   unshare(CLONE_NEWNS) gives the process its own private copy of the mount
+//   table. Any mounts or unmounts the process performs after this call are
+//   invisible to the host. The host's mounts are still visible (they were
+//   inherited at fork time), but new ones added inside only exist here.
 //
-// setgroups:
-//   Before writing gid_map from an UNPRIVILEGED process, you must first
-//   write "deny" to /proc/<pid>/setgroups. This is a security restriction
-//   added in Linux 3.19 to prevent privilege escalation via setgroups().
-//   If you skip this, writing gid_map will fail with EPERM.
+// mount(2):
+//   Attaches a filesystem to a point in the directory tree.
+//   Prototype: mount(source, target, fstype, flags, data)
+//   - MS_BIND: bind mount — make a directory reachable at another path.
+//   - MS_RDONLY: mount read-only.
+//   - MS_REC: apply recursively (needed with MS_BIND for submounts).
+//   - MS_REMOUNT: change flags on an already-mounted filesystem.
+//   Bind mount example: mount("/usr/lib", "/tmp/sandbox/usr/lib",
+//                             nullptr, MS_BIND|MS_REC, nullptr)
+//   makes the host /usr/lib accessible at the sandbox path.
 //
-// CLONE_NEWPID:
-//   After the USER namespace is created and mapped, we call
-//   unshare(CLONE_NEWPID). This schedules the next CHILD forked by this
-//   process to be in a new PID namespace. The parent itself stays in its
-//   original PID namespace — this is an important subtlety.
+//   To make a bind mount read-only you MUST use two calls:
+//     1. mount(src, tgt, nullptr, MS_BIND|MS_REC, nullptr)  — bind first
+//     2. mount(nullptr, tgt, nullptr,
+//              MS_BIND|MS_REC|MS_RDONLY|MS_REMOUNT, nullptr) — then remount RO
+//   A single mount call with MS_BIND|MS_RDONLY is silently ignored by the
+//   kernel; it is applied only on remount.
 //
-//   The new PID namespace takes effect for CHILDREN, not the current process.
-//   So after unshare(CLONE_NEWPID), you fork() and the child sees itself as PID 1.
+// tmpfs:
+//   An in-memory filesystem. Completely empty on creation, discarded when
+//   unmounted. We use it as the sandbox root because it needs no real disk.
+//   mount("tmpfs", path, "tmpfs", MS_NOSUID|MS_NODEV, nullptr)
 //
-// /proc/self/ns/user and /proc/self/ns/pid:
-//   These are special filesystem files. Opening them gives you an fd that
-//   "holds" the namespace alive. If you close all fds pointing to a namespace
-//   and all processes leave it, the namespace is destroyed.
-//   We keep these fds open (via ScopedFd) to prevent premature destruction.
+// pivot_root(new_root, put_old):
+//   Swaps the root filesystem of the calling process's mount namespace.
+//   After pivot_root(new_root, put_old):
+//     - new_root becomes /  (the sandbox's entire view of the filesystem)
+//     - the old root is accessible at put_old (a directory INSIDE new_root)
+//   We then unmount put_old so the old root is gone from the sandbox view.
+//   pivot_root requires new_root to be a mount point (hence we mount tmpfs
+//   there first) and new_root ≠ current root (we are in a new mount NS).
+//   pivot_root is a raw Linux syscall — use syscall(SYS_pivot_root, ...).
+//
+// ── SANDBOX DIRECTORY STRUCTURE CREATED BY Sprint 2 ─────────────────────────
+//
+//   /tmp/astra_sandbox/<pid>/          ← tmpfs mounted here (sandbox root)
+//   /tmp/astra_sandbox/<pid>/usr/
+//   /tmp/astra_sandbox/<pid>/usr/lib/  ← bind mount of host /usr/lib (RO)
+//   /tmp/astra_sandbox/<pid>/usr/share/← bind mount of host /usr/share (RO)
+//   /tmp/astra_sandbox/<pid>/proc/     ← empty dir (for future /proc mount)
+//   /tmp/astra_sandbox/<pid>/tmp/      ← writable scratch space
+//   /tmp/astra_sandbox/<pid>/.oldroot/ ← pivot_root puts old root here,
+//                                        then we unmount it
+//
+// After pivot_root and old-root unmount, the sandbox process sees:
+//   /              (was /tmp/astra_sandbox/<pid>/)
+//   /usr/lib/      (read-only, host /usr/lib)
+//   /usr/share/    (read-only, host /usr/share)
+//   /proc/         (empty directory)
+//   /tmp/          (writable tmpfs scratch)
+//   — no /etc, no /home, no /root, no host binaries
 // ============================================================================
 #include <astra/isolation/namespace_manager.h>
 #include <astra/core/logger.h>
 
 ASTRA_DEFINE_LOGGER(g_logNamespaceMgr);
 
-// Linux-specific headers — only compile on Linux
-#include <fcntl.h>          // open(), O_RDONLY, O_WRONLY, O_CREAT, O_TRUNC
+// Linux-specific headers
+#include <fcntl.h>          // open(), O_RDONLY, O_WRONLY
 #include <unistd.h>         // unshare(), getuid(), getgid(), write(), close()
-#include <sched.h>          // CLONE_NEWUSER, CLONE_NEWPID, CLONE_NEWNS, etc.
+#include <sched.h>          // CLONE_NEWUSER, CLONE_NEWPID, CLONE_NEWNS
 #include <sys/types.h>      // pid_t, uid_t, gid_t
+#include <sys/mount.h>      // mount(), umount2(), MS_BIND, MS_RDONLY, etc.
+#include <sys/stat.h>       // mkdir(), mode_t
+#include <sys/syscall.h>    // SYS_pivot_root — pivot_root has no libc wrapper
 #include <cerrno>           // errno
 #include <cstring>          // strerror()
 #include <string>           // std::string, std::to_string()
-#include <fstream>          // std::ofstream (for writing proc files)
 
 namespace astra
 {
@@ -64,147 +92,174 @@ namespace isolation
 
 // ============================================================================
 // ScopedFd::close()
-//
-// This is the actual close() call that runs when the ScopedFd is destroyed
-// or reset. We call ::close() (the Linux syscall wrapper) to close the fd.
-// We check isValid() to avoid double-close bugs.
 // ============================================================================
 void ScopedFd::close() noexcept
 {
     if (m_iFd >= 0)
     {
-        ::close(m_iFd);     // ::close is the libc close, not our class method
-        m_iFd = INVALID_FD; // mark as invalid so we don't close again
+        ::close(m_iFd);
+        m_iFd = INVALID_FD;
     }
 }
 
 // ============================================================================
-// Constructor — nothing special, just init state
+// Constructor
 // ============================================================================
 NamespaceManager::NamespaceManager()
     : m_eState(NamespaceState::INIT)
     , m_fdUserNs()
     , m_fdPidNs()
+    , m_fdMountNs()
+    , m_szSandboxRoot()
 {
 }
 
 // ============================================================================
-// Destructor — rollback if we are not in ACTIVE state.
+// Destructor — rollback any partial state.
 //
-// WHY: If the object is destroyed before setup() completes (e.g. an
-// exception-less early return on error), we want to clean up any partial
-// state. The ScopedFd members will close their fds automatically.
+// We rollback if state is neither ACTIVE (fully done) nor INIT (never started).
+// ACTIVE sandboxes are torn down by the LifecycleManager, not here.
 // ============================================================================
 NamespaceManager::~NamespaceManager()
 {
-    if (m_eState.load(std::memory_order_acquire) != NamespaceState::ACTIVE
-     && m_eState.load(std::memory_order_acquire) != NamespaceState::INIT)
+    NamespaceState lECurrent = m_eState.load(std::memory_order_acquire);
+    if (lECurrent != NamespaceState::ACTIVE
+     && lECurrent != NamespaceState::INIT)
     {
         rollback();
     }
 }
 
 // ============================================================================
-// setup() — the main entry point. Called from inside the child process.
+// setup() — master entry point.
 //
-// Steps:
-//   1. createUserNamespace()  →  NamespaceState::USER_CREATED
-//   2. writeUidGidMaps()      →  NamespaceState::MAPPED
-//   3. createPidNamespace()   →  NamespaceState::PID_CREATED
-//   4. Set state to ACTIVE
+// Ordered steps:
+//   Sprint 1: USER → UID/GID maps → PID
+//   Sprint 2: (Sprint 1 steps) → MOUNT → filesystem + pivot_root
 //
-// On any failure, we call rollback() and return the error.
-// The caller (LifecycleManager) does not need to call rollback() separately
-// in the failure case — setup() handles it internally.
+// On any step failure, rollback() is called internally and the error is
+// returned. The caller does not need to call rollback() separately.
 // ============================================================================
 Status NamespaceManager::setup(const SandboxProfile& aProfile,
                                U32                   aUHostUid,
                                U32                   aUHostGid)
 {
-    // --- Guard: PID namespace requires USER namespace ---
-    // On unprivileged processes, unshare(CLONE_NEWPID) needs a user
-    // namespace first. Catch this misconfiguration early.
+    // ── Precondition guards ──────────────────────────────────────────────────
+
+    // PID namespace requires USER namespace for unprivileged processes.
     if (aProfile.m_nsFlags.m_bPid && !aProfile.m_nsFlags.m_bUser)
     {
-        return astra::unexpected(makeError(
+        return std::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::ISOLATION,
             "PID namespace requires USER namespace for unprivileged operation"
         ));
     }
 
-    // --- Guard: nothing to do ---
-    // If no namespaces are requested, skip straight to ACTIVE.
-    if (!aProfile.m_nsFlags.m_bUser && !aProfile.m_nsFlags.m_bPid)
+    // MOUNT namespace requires USER namespace (same reason as PID).
+    if (aProfile.m_nsFlags.m_bMount && !aProfile.m_nsFlags.m_bUser)
     {
-        m_eState.store(NamespaceState::ACTIVE, std::memory_order_release);
-        return {};  // nothing to set up
+        return std::unexpected(makeError(
+            ErrorCode::INVALID_ARGUMENT,
+            ErrorCategory::ISOLATION,
+            "MOUNT namespace requires USER namespace for unprivileged operation"
+        ));
     }
 
-    // --- Step 1: USER namespace ---
-    // Only proceed if the profile requires a user namespace
+    // Nothing to do — jump straight to ACTIVE.
+    if (!aProfile.m_nsFlags.m_bUser
+     && !aProfile.m_nsFlags.m_bPid
+     && !aProfile.m_nsFlags.m_bMount)
+    {
+        m_eState.store(NamespaceState::ACTIVE, std::memory_order_release);
+        return {};
+    }
+
+    // ── Step 1: USER namespace ───────────────────────────────────────────────
     if (aProfile.m_nsFlags.m_bUser)
     {
-        Status lStUser = createUserNamespace();
-        if (!lStUser.has_value())
+        Status lSt = createUserNamespace();
+        if (!lSt.has_value())
         {
             rollback();
-            return lStUser;
+            return lSt;
         }
-        // State is now USER_CREATED (set inside createUserNamespace)
+        // m_eState == USER_CREATED
 
-        // --- Step 2: Write UID/GID maps ---
-        // This must happen while we are in the new user namespace but
-        // before we do anything that requires privilege inside it.
+        // ── Step 2: UID/GID maps ─────────────────────────────────────────────
         Status lStMap = writeUidGidMaps(aUHostUid, aUHostGid);
         if (!lStMap.has_value())
         {
             rollback();
             return lStMap;
         }
-        // State is now MAPPED
+        // m_eState == MAPPED
     }
 
-    // --- Step 3: PID namespace ---
-    // Only create if profile requires it AND user namespace was created
-    // (PID namespace needs user namespace for unprivileged operation)
+    // ── Step 3: PID namespace ────────────────────────────────────────────────
     if (aProfile.m_nsFlags.m_bPid)
     {
-        Status lStPid = createPidNamespace();
-        if (!lStPid.has_value())
+        Status lSt = createPidNamespace();
+        if (!lSt.has_value())
         {
             rollback();
-            return lStPid;
+            return lSt;
         }
-        // State is now PID_CREATED
+        // m_eState == PID_CREATED
     }
 
-    // All steps succeeded
+    // ── Step 4: MOUNT namespace (Sprint 2) ───────────────────────────────────
+    if (aProfile.m_nsFlags.m_bMount)
+    {
+        Status lSt = createMountNamespace();
+        if (!lSt.has_value())
+        {
+            rollback();
+            return lSt;
+        }
+        // m_eState == MOUNT_CREATED
+
+        // ── Step 5: Build sandbox filesystem + pivot_root (Sprint 2) ─────────
+        Status lStFs = buildSandboxFilesystem();
+        if (!lStFs.has_value())
+        {
+            rollback();
+            return lStFs;
+        }
+        // m_eState == FS_PIVOTED
+    }
+
     m_eState.store(NamespaceState::ACTIVE, std::memory_order_release);
     return {};
 }
 
 // ============================================================================
-// rollback() — undo partial namespace creation.
+// rollback() — undo whatever partial state was built.
 //
-// In our case, the ScopedFds (m_fdUserNs, m_fdPidNs) will close when
-// this object is destroyed, which removes the last reference to the
-// namespace files. The kernel will then clean up the namespaces.
+// The ScopedFds close automatically when reset to empty ScopedFd().
+// When the last fd holding a namespace is closed AND no process lives in
+// that namespace, the kernel destroys it.
 //
-// We reset the state back to INIT so the object can be cleanly destroyed.
+// For the sandbox root directory (Sprint 2) we make a best-effort cleanup.
 // ============================================================================
 void NamespaceManager::rollback() noexcept
 {
-    // Close the namespace file descriptors. When they close, the kernel
-    // will destroy the namespaces if no other references exist.
-    m_fdPidNs  = ScopedFd();   // move-assign an empty ScopedFd → closes old fd
-    m_fdUserNs = ScopedFd();
+    // Close namespace fds in reverse creation order.
+    m_fdMountNs = ScopedFd();
+    m_fdPidNs   = ScopedFd();
+    m_fdUserNs  = ScopedFd();
+
+    // Best-effort sandbox root cleanup (Sprint 2).
+    if (!m_szSandboxRoot.empty())
+    {
+        cleanupSandboxRoot();
+    }
 
     m_eState.store(NamespaceState::INIT, std::memory_order_release);
 }
 
 // ============================================================================
-// state() and isActive()
+// state() / isActive()
 // ============================================================================
 NamespaceState NamespaceManager::state() const noexcept
 {
@@ -217,38 +272,33 @@ bool NamespaceManager::isActive() const noexcept
 }
 
 // ============================================================================
+// ── SPRINT 1 STEPS ───────────────────────────────────────────────────────────
+// ============================================================================
+
+// ============================================================================
 // createUserNamespace() — Step 1.
 //
-// Calls unshare(CLONE_NEWUSER) to create a new user namespace.
-// After this call:
-//   - The current process is inside the new namespace
-//   - The process has no UID mapping yet (looks like uid=65534 to itself)
-//   - The process has CAP_SYS_ADMIN and other caps INSIDE the namespace
-//     (but these do not grant host privileges — that's the point)
+// unshare(CLONE_NEWUSER) creates a new user namespace and moves the calling
+// process into it. No privilege is required (Linux ≥ 3.8 by design).
 //
-// We then open /proc/self/ns/user and save that fd. This "pins" the
-// namespace open even if the process later transitions states.
+// After this call the process has CAP_SYS_ADMIN inside its namespace, but
+// those capabilities confer no real host privilege.
 // ============================================================================
 Status NamespaceManager::createUserNamespace()
 {
-    // unshare(CLONE_NEWUSER) — create a new user namespace
-    // This call requires no special privilege (by design in Linux since 3.8)
     if (::unshare(CLONE_NEWUSER) != 0)
     {
         int lIErrno = errno;
-        return astra::unexpected(makeError(
+        return std::unexpected(makeError(
             ErrorCode::NAMESPACE_SETUP_FAILED,
             ErrorCategory::ISOLATION,
             std::string("unshare(CLONE_NEWUSER) failed: ") + strerror(lIErrno)
         ));
     }
 
-    // Open the namespace fd to pin it
-    Status lStOpen = openNsFd("user", m_fdUserNs);
-    if (!lStOpen.has_value())
-    {
-        return lStOpen;
-    }
+    Status lSt = openNsFd("user", m_fdUserNs);
+    if (!lSt.has_value())
+        return lSt;
 
     m_eState.store(NamespaceState::USER_CREATED, std::memory_order_release);
     return {};
@@ -257,57 +307,31 @@ Status NamespaceManager::createUserNamespace()
 // ============================================================================
 // writeUidGidMaps() — Step 2.
 //
-// After creating the user namespace, we must write the UID and GID mappings.
-// Without this, any process inside the namespace looks like uid=65534 (nobody)
-// to itself, which breaks most programs.
+// Mandatory ordering:
+//   1. Write "deny" to /proc/self/setgroups   (required by Linux ≥ 3.19)
+//   2. Write uid_map  ("0 <hostUid> 1\n")
+//   3. Write gid_map  ("0 <hostGid> 1\n")
 //
-// The format of uid_map is:
-//   <inside_start> <outside_start> <count>
-//
-// We write: "0 <hostUid> 1"
-//   meaning: inside UID 0 maps to outside UID <hostUid>, count=1
-//
-// For gid_map, same thing but for groups.
-//
-// CRITICAL: We must write "deny" to setgroups BEFORE writing gid_map.
-// This is a Linux security requirement (since 3.19). If you skip this,
-// the gid_map write fails with EPERM.
-//
-// The path format is: /proc/self/uid_map, /proc/self/gid_map,
-//                     /proc/self/setgroups
-// We use "self" which means "the current process" — always correct.
+// After these writes, getuid() inside the namespace returns 0 (root).
 // ============================================================================
 Status NamespaceManager::writeUidGidMaps(U32 aUHostUid, U32 aUHostGid)
 {
-    // Step 2a: Write "deny" to setgroups first (mandatory before gid_map)
-    Status lStSetgroups = writeProcFile(
-        "/proc/self/setgroups",
-        "deny"
-    );
-    if (!lStSetgroups.has_value())
-    {
-        return lStSetgroups;
-    }
+    // 2a — setgroups must be denied BEFORE writing gid_map.
+    Status lSt = writeProcFile("/proc/self/setgroups", "deny");
+    if (!lSt.has_value())
+        return lSt;
 
-    // Step 2b: Write uid_map
-    // Format: "0 <hostUid> 1\n"
-    //   - 0        = UID inside namespace that we're mapping
-    //   - hostUid  = UID on the host that it maps to
-    //   - 1        = number of UIDs in this range (just one)
+    // 2b — uid_map: "inside_uid host_uid count"
     std::string lSzUidMap = "0 " + std::to_string(aUHostUid) + " 1\n";
-    Status lStUid = writeProcFile("/proc/self/uid_map", lSzUidMap);
-    if (!lStUid.has_value())
-    {
-        return lStUid;
-    }
+    lSt = writeProcFile("/proc/self/uid_map", lSzUidMap);
+    if (!lSt.has_value())
+        return lSt;
 
-    // Step 2c: Write gid_map
+    // 2c — gid_map (same format)
     std::string lSzGidMap = "0 " + std::to_string(aUHostGid) + " 1\n";
-    Status lStGid = writeProcFile("/proc/self/gid_map", lSzGidMap);
-    if (!lStGid.has_value())
-    {
-        return lStGid;
-    }
+    lSt = writeProcFile("/proc/self/gid_map", lSzGidMap);
+    if (!lSt.has_value())
+        return lSt;
 
     m_eState.store(NamespaceState::MAPPED, std::memory_order_release);
     return {};
@@ -316,117 +340,352 @@ Status NamespaceManager::writeUidGidMaps(U32 aUHostUid, U32 aUHostGid)
 // ============================================================================
 // createPidNamespace() — Step 3.
 //
-// Calls unshare(CLONE_NEWPID) to prepare a new PID namespace.
-//
-// IMPORTANT SUBTLETY:
-//   unshare(CLONE_NEWPID) does NOT move the current process into the new
-//   PID namespace. It sets things up so that the NEXT child process
-//   created by fork() will be the first process (PID 1) in the new namespace.
-//
-//   So after this call, if you do:
-//     pid_t child = fork();
-//     if (child == 0) { /* I am PID 1 in the new namespace */ }
-//
-//   The parent remains in the old PID namespace.
-//
-// This means: in our test, we fork AFTER calling setup(). The forked child
-// will see itself as PID 1 when it calls getpid().
+// unshare(CLONE_NEWPID) schedules the NEXT fork() from this process to land
+// in a new PID namespace as PID 1. The calling process itself is NOT moved.
 // ============================================================================
 Status NamespaceManager::createPidNamespace()
 {
     if (::unshare(CLONE_NEWPID) != 0)
     {
         int lIErrno = errno;
-        return astra::unexpected(makeError(
+        return std::unexpected(makeError(
             ErrorCode::NAMESPACE_SETUP_FAILED,
             ErrorCategory::ISOLATION,
             std::string("unshare(CLONE_NEWPID) failed: ") + strerror(lIErrno)
         ));
     }
 
-    // Open the namespace fd to pin it
-    // Note: after unshare(CLONE_NEWPID), the new namespace isn't
-    // "active" for the current process yet — but the fd still pins
-    // the namespace object in the kernel.
-    Status lStOpen = openNsFd("pid", m_fdPidNs);
-    if (!lStOpen.has_value())
-    {
-        return lStOpen;
-    }
+    Status lSt = openNsFd("pid", m_fdPidNs);
+    if (!lSt.has_value())
+        return lSt;
 
     m_eState.store(NamespaceState::PID_CREATED, std::memory_order_release);
     return {};
 }
 
 // ============================================================================
-// openNsFd() — open /proc/self/ns/<name> and store fd in aFdOut.
+// ── SPRINT 2 STEPS ───────────────────────────────────────────────────────────
+// ============================================================================
+
+// ============================================================================
+// createMountNamespace() — Step 4.
 //
-// This is a helper used by createUserNamespace() and createPidNamespace().
-// We open O_RDONLY — we don't need to write to the ns file, just pin it.
+// unshare(CLONE_NEWNS) gives this process a private copy of the host mount
+// table. All future mount/umount calls are invisible to the host.
+//
+// We also construct the path for this sandbox's root directory using the
+// process PID as a unique suffix:
+//   m_szSandboxRoot = "/tmp/astra_sandbox/<pid>"
+//
+// Using the PID ensures no two concurrent sandboxes collide on the same
+// directory path.
+// ============================================================================
+Status NamespaceManager::createMountNamespace()
+{
+    if (::unshare(CLONE_NEWNS) != 0)
+    {
+        int lIErrno = errno;
+        return std::unexpected(makeError(
+            ErrorCode::NAMESPACE_SETUP_FAILED,
+            ErrorCategory::ISOLATION,
+            std::string("unshare(CLONE_NEWNS) failed: ") + strerror(lIErrno)
+        ));
+    }
+
+    // Build the per-sandbox root path: /tmp/astra_sandbox/<pid>
+    // getpid() here still returns the host PID (we are in the process
+    // that called unshare, not a forked child yet). That is intentional —
+    // it gives us a unique directory name.
+    m_szSandboxRoot = std::string(SANDBOX_BASE_PATH)
+                    + "/"
+                    + std::to_string(static_cast<long>(::getpid()));
+
+    Status lSt = openNsFd("mnt", m_fdMountNs);
+    if (!lSt.has_value())
+        return lSt;
+
+    m_eState.store(NamespaceState::MOUNT_CREATED, std::memory_order_release);
+    return {};
+}
+
+// ============================================================================
+// buildSandboxFilesystem() — Step 5.
+//
+// Constructs a minimal root filesystem and pivots into it.
+//
+// Sequence:
+//   A. Create the sandbox root directory and subdirectories.
+//   B. Mount a tmpfs at the sandbox root — this becomes the future /.
+//   C. Re-create the needed subdirectories on the tmpfs (they were created
+//      on the host filesystem before the tmpfs mount, so we need them again
+//      inside the tmpfs).
+//   D. Bind-mount /usr/lib  read-only at sandbox_root/usr/lib.
+//   E. Bind-mount /usr/share read-only at sandbox_root/usr/share.
+//   F. Create sandbox_root/.oldroot — pivot_root will place the host root
+//      here before we unmount it.
+//   G. Call pivot_root(sandbox_root, sandbox_root/.oldroot).
+//      After this call:
+//        /              = old sandbox_root (the tmpfs)
+//        /.oldroot/     = old host /
+//   H. chdir("/") — required after pivot_root to update CWD.
+//   I. Unmount /.oldroot recursively — removes the host filesystem from view.
+//   J. Remove /.oldroot directory (clean up).
+//
+// WHY the two-call pattern for read-only bind mounts:
+//   The kernel ignores MS_RDONLY on the first bind mount call. You must bind
+//   first (read-write) and then remount with MS_RDONLY. Any other approach
+//   silently leaves the bind writable.
+// ============================================================================
+Status NamespaceManager::buildSandboxFilesystem()
+{
+    // ── A. Create base directory structure on the HOST filesystem ─────────────
+    // These are created before the tmpfs mount so we have a place to mount to.
+
+    Status lSt = ensureDir(SANDBOX_BASE_PATH);
+    if (!lSt.has_value()) return lSt;
+
+    lSt = ensureDir(m_szSandboxRoot);
+    if (!lSt.has_value()) return lSt;
+
+    // ── B. Mount tmpfs at the sandbox root ────────────────────────────────────
+    // MS_NOSUID: setuid bits have no effect inside the sandbox.
+    // MS_NODEV:  device files are ignored (no raw disk/mem access).
+    // "size=64m": limit the tmpfs to 64 MB to prevent runaway writes.
+    if (::mount("tmpfs",
+                m_szSandboxRoot.c_str(),
+                "tmpfs",
+                MS_NOSUID | MS_NODEV,
+                "size=64m") != 0)
+    {
+        int lIErrno = errno;
+        return std::unexpected(makeError(
+            ErrorCode::NAMESPACE_SETUP_FAILED,
+            ErrorCategory::ISOLATION,
+            std::string("mount tmpfs at ") + m_szSandboxRoot
+            + " failed: " + strerror(lIErrno)
+        ));
+    }
+
+    // ── C. Create subdirectories ON THE TMPFS ────────────────────────────────
+    // These are created after the tmpfs mount — they live in the sandbox root.
+    const std::string lSzUsr     = m_szSandboxRoot + "/usr";
+    const std::string lSzUsrLib  = m_szSandboxRoot + "/usr/lib";
+    const std::string lSzUsrShr  = m_szSandboxRoot + "/usr/share";
+    const std::string lSzProc    = m_szSandboxRoot + "/proc";
+    const std::string lSzTmp     = m_szSandboxRoot + "/tmp";
+    const std::string lSzOldRoot = m_szSandboxRoot + "/.oldroot";
+
+    for (const std::string& lSzDir : { lSzUsr, lSzUsrLib, lSzUsrShr,
+                                       lSzProc, lSzTmp, lSzOldRoot })
+    {
+        lSt = ensureDir(lSzDir);
+        if (!lSt.has_value()) return lSt;
+    }
+
+    // ── D. Bind-mount /usr/lib read-only ─────────────────────────────────────
+    // Call 1: bind mount (must be RW first — kernel ignores RO on first bind)
+    if (::mount("/usr/lib",
+                lSzUsrLib.c_str(),
+                nullptr,
+                MS_BIND | MS_REC,
+                nullptr) != 0)
+    {
+        int lIErrno = errno;
+        return std::unexpected(makeError(
+            ErrorCode::NAMESPACE_SETUP_FAILED,
+            ErrorCategory::ISOLATION,
+            std::string("bind mount /usr/lib failed: ") + strerror(lIErrno)
+        ));
+    }
+
+    // Call 2: remount read-only — this is what actually enforces RO.
+    if (::mount(nullptr,
+                lSzUsrLib.c_str(),
+                nullptr,
+                MS_BIND | MS_REC | MS_RDONLY | MS_REMOUNT,
+                nullptr) != 0)
+    {
+        int lIErrno = errno;
+        return std::unexpected(makeError(
+            ErrorCode::NAMESPACE_SETUP_FAILED,
+            ErrorCategory::ISOLATION,
+            std::string("remount /usr/lib read-only failed: ") + strerror(lIErrno)
+        ));
+    }
+
+    // ── E. Bind-mount /usr/share read-only ───────────────────────────────────
+    if (::mount("/usr/share",
+                lSzUsrShr.c_str(),
+                nullptr,
+                MS_BIND | MS_REC,
+                nullptr) != 0)
+    {
+        int lIErrno = errno;
+        return std::unexpected(makeError(
+            ErrorCode::NAMESPACE_SETUP_FAILED,
+            ErrorCategory::ISOLATION,
+            std::string("bind mount /usr/share failed: ") + strerror(lIErrno)
+        ));
+    }
+
+    if (::mount(nullptr,
+                lSzUsrShr.c_str(),
+                nullptr,
+                MS_BIND | MS_REC | MS_RDONLY | MS_REMOUNT,
+                nullptr) != 0)
+    {
+        int lIErrno = errno;
+        return std::unexpected(makeError(
+            ErrorCode::NAMESPACE_SETUP_FAILED,
+            ErrorCategory::ISOLATION,
+            std::string("remount /usr/share read-only failed: ") + strerror(lIErrno)
+        ));
+    }
+
+    // ── G. pivot_root ─────────────────────────────────────────────────────────
+    // pivot_root has no glibc wrapper — use the raw syscall.
+    // Signature: pivot_root(const char *new_root, const char *put_old)
+    //   new_root — the new root directory (our sandbox tmpfs)
+    //   put_old  — where to place the old root (we will unmount it right after)
+    if (::syscall(SYS_pivot_root,
+                  m_szSandboxRoot.c_str(),
+                  lSzOldRoot.c_str()) != 0)
+    {
+        int lIErrno = errno;
+        return std::unexpected(makeError(
+            ErrorCode::NAMESPACE_SETUP_FAILED,
+            ErrorCategory::ISOLATION,
+            std::string("pivot_root failed: ") + strerror(lIErrno)
+        ));
+    }
+
+    // ── H. chdir("/") after pivot_root ───────────────────────────────────────
+    // The CWD still points into the old root after pivot_root. Reset it.
+    if (::chdir("/") != 0)
+    {
+        int lIErrno = errno;
+        return std::unexpected(makeError(
+            ErrorCode::NAMESPACE_SETUP_FAILED,
+            ErrorCategory::ISOLATION,
+            std::string("chdir('/') after pivot_root failed: ") + strerror(lIErrno)
+        ));
+    }
+
+    // ── I. Unmount old root ───────────────────────────────────────────────────
+    // MNT_DETACH: lazy unmount — detaches the mount point immediately even if
+    // it is busy, and cleans up when all references are dropped.
+    // After this the old host filesystem is completely gone from sandbox view.
+    if (::umount2("/.oldroot", MNT_DETACH) != 0)
+    {
+        int lIErrno = errno;
+        return std::unexpected(makeError(
+            ErrorCode::NAMESPACE_SETUP_FAILED,
+            ErrorCategory::ISOLATION,
+            std::string("umount2(/.oldroot) failed: ") + strerror(lIErrno)
+        ));
+    }
+
+    // ── J. Remove /.oldroot directory ────────────────────────────────────────
+    // Now that it is unmounted, remove the empty mount point directory.
+    // rmdir fails only if the directory is not empty or doesn't exist —
+    // both are non-fatal at this stage; we still return success.
+    ::rmdir("/.oldroot");
+
+    m_eState.store(NamespaceState::FS_PIVOTED, std::memory_order_release);
+    return {};
+}
+
+// ============================================================================
+// cleanupSandboxRoot() — best-effort cleanup during rollback.
+//
+// If buildSandboxFilesystem() fails partway through, we may have:
+//   - A tmpfs mounted at m_szSandboxRoot
+//   - Bind mounts inside m_szSandboxRoot
+//
+// MNT_DETACH unmounts them lazily. rmdir removes the now-empty directory.
+// This is noexcept — errors here are silently swallowed because we are
+// already handling a failure and cannot do anything useful about a
+// secondary cleanup failure.
+// ============================================================================
+void NamespaceManager::cleanupSandboxRoot() noexcept
+{
+    if (m_szSandboxRoot.empty())
+        return;
+
+    // Try to unmount anything mounted under or at sandbox root (lazy).
+    // Sub-mounts first, then the root mount.
+    const std::string lSzUsrLib = m_szSandboxRoot + "/usr/lib";
+    const std::string lSzUsrShr = m_szSandboxRoot + "/usr/share";
+
+    ::umount2(lSzUsrLib.c_str(), MNT_DETACH);
+    ::umount2(lSzUsrShr.c_str(), MNT_DETACH);
+    ::umount2(m_szSandboxRoot.c_str(), MNT_DETACH);
+
+    // Remove the sandbox root directory.
+    ::rmdir(m_szSandboxRoot.c_str());
+
+    m_szSandboxRoot.clear();
+}
+
+// ============================================================================
+// ── SHARED HELPERS ───────────────────────────────────────────────────────────
+// ============================================================================
+
+// ============================================================================
+// openNsFd() — open /proc/self/ns/<aSzNsName> and store fd in aFdOut.
+//
+// O_CLOEXEC ensures the fd is closed automatically if exec() is called,
+// preventing namespace fd leaks into exec'd programs.
 // ============================================================================
 Status NamespaceManager::openNsFd(const char* aSzNsName, ScopedFd& aFdOut)
 {
     std::string lSzPath = std::string("/proc/self/ns/") + aSzNsName;
 
     int lIFd = ::open(lSzPath.c_str(), O_RDONLY | O_CLOEXEC);
-    // O_CLOEXEC means: close this fd automatically in child processes
-    // created by exec(). This prevents fd leaks if we exec a new binary.
-
     if (lIFd < 0)
     {
         int lIErrno = errno;
-        return astra::unexpected(makeError(
+        return std::unexpected(makeError(
             ErrorCode::NAMESPACE_SETUP_FAILED,
             ErrorCategory::ISOLATION,
             std::string("open(") + lSzPath + ") failed: " + strerror(lIErrno)
         ));
     }
 
-    aFdOut.reset(lIFd);  // ScopedFd takes ownership
+    aFdOut.reset(lIFd);
     return {};
 }
 
 // ============================================================================
-// writeProcFile() — write content to a /proc file.
+// writeProcFile() — write aSzContent to a /proc kernel interface file.
 //
-// We use std::ofstream here for simplicity. The /proc files we write to
-// (/proc/self/uid_map, /proc/self/gid_map, /proc/self/setgroups) are
-// NOT real files on disk — they are kernel interfaces. The write()
-// syscall on them triggers kernel code.
-//
-// We use O_WRONLY | O_TRUNC pattern (via ofstream) which is standard
-// for writing to these proc files.
+// /proc/self/uid_map, gid_map, setgroups are not real disk files — writing
+// to them invokes kernel code. We use the raw write(2) syscall path via
+// ::open + ::write to avoid any buffering artefacts from std::ofstream.
 // ============================================================================
 Status NamespaceManager::writeProcFile(const std::string& aSzPath,
                                        const std::string& aSzContent)
 {
-    // Open the file for writing
-    // std::ofstream is fine here — these are small single-write operations
     int lIFd = ::open(aSzPath.c_str(), O_WRONLY);
     if (lIFd < 0)
     {
         int lIErrno = errno;
-        return astra::unexpected(makeError(
+        return std::unexpected(makeError(
             ErrorCode::NAMESPACE_SETUP_FAILED,
             ErrorCategory::ISOLATION,
             std::string("open(") + aSzPath + ") failed: " + strerror(lIErrno)
         ));
     }
 
-    ScopedFd lScopedFd(lIFd);  // RAII — will close on exit
+    ScopedFd lScopedFd(lIFd);
 
-    // Write the content
-    // ssize_t is signed — can be -1 on error
-    ssize_t lIWritten = ::write(
-        lScopedFd.get(),
-        aSzContent.c_str(),
-        aSzContent.size()
-    );
-
+    ssize_t lIWritten = ::write(lScopedFd.get(),
+                                aSzContent.c_str(),
+                                aSzContent.size());
     if (lIWritten < 0)
     {
         int lIErrno = errno;
-        return astra::unexpected(makeError(
+        return std::unexpected(makeError(
             ErrorCode::NAMESPACE_SETUP_FAILED,
             ErrorCategory::ISOLATION,
             std::string("write(") + aSzPath + ") failed: " + strerror(lIErrno)
@@ -435,13 +694,37 @@ Status NamespaceManager::writeProcFile(const std::string& aSzPath,
 
     if (static_cast<SizeT>(lIWritten) != aSzContent.size())
     {
-        return astra::unexpected(makeError(
+        return std::unexpected(makeError(
             ErrorCode::NAMESPACE_SETUP_FAILED,
             ErrorCategory::ISOLATION,
             std::string("partial write to ") + aSzPath
         ));
     }
 
+    return {};
+}
+
+// ============================================================================
+// ensureDir() — create aSzPath with mode 0755 if it does not already exist.
+//
+// mkdir(2) returns EEXIST when the directory is already present — that is
+// not an error for us, so we filter it out. Any other errno is a real error.
+// ============================================================================
+Status NamespaceManager::ensureDir(const std::string& aSzPath)
+{
+    if (::mkdir(aSzPath.c_str(), 0755) != 0)
+    {
+        int lIErrno = errno;
+        if (lIErrno != EEXIST)
+        {
+            return std::unexpected(makeError(
+                ErrorCode::NAMESPACE_SETUP_FAILED,
+                ErrorCategory::ISOLATION,
+                std::string("mkdir(") + aSzPath + ") failed: " + strerror(lIErrno)
+            ));
+        }
+        // EEXIST → directory already exists → that is fine
+    }
     return {};
 }
 
