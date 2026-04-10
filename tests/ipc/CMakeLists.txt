@@ -17,3 +17,17 @@ target_link_libraries(test_ipc_sprint1
 add_test(NAME Sprint1IpcChannelFactoryTest COMMAND test_ipc_sprint1)
 
 message(STATUS "  [M-03] test_ipc_sprint1 configured")
+
+# Live demo: shows IPC working interactively in the terminal
+add_executable(demo_ipc_live
+    demo_ipc_live.cpp
+)
+
+target_link_libraries(demo_ipc_live
+    PRIVATE
+        astra_ipc
+        astra_core
+        pthread
+)
+
+message(STATUS "  [M-03] demo_ipc_live configured")

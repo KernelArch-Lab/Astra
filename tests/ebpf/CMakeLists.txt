@@ -43,3 +43,30 @@ add_test(
 )
 
 message(STATUS "  [M-09] test_ebpf configured")
+
+# Live demo: shows eBPF observability pipeline working interactively
+add_executable(demo_ebpf_live
+    demo_ebpf_live.cpp
+)
+
+set_target_properties(demo_ebpf_live PROPERTIES
+    CXX_STANDARD            23
+    CXX_STANDARD_REQUIRED   ON
+    CXX_EXTENSIONS          OFF
+)
+
+target_include_directories(demo_ebpf_live
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/include
+)
+
+target_link_libraries(demo_ebpf_live
+    PRIVATE
+        astra_ebpf
+        astra_core
+        bpf
+        elf
+        pthread
+)
+
+message(STATUS "  [M-09] demo_ebpf_live configured")

@@ -156,6 +156,10 @@ private:
     // so we can call bpf_object__close() during unloadAll().
     std::vector<bpf_object*> m_vLoadedObjects;
 
+    // Flat list of attached BPF program links. Destroyed in unloadAll()
+    // to cleanly detach probes before closing the objects.
+    std::vector<struct bpf_link*> m_vAttachedLinks;
+
     // Root directory to scan for .bpf.o files
     std::filesystem::path m_probeDir;
 

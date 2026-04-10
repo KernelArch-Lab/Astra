@@ -38,7 +38,7 @@
 // C++ standard library
 #include <cstdio>
 #include <filesystem>
-#include <format>
+#include <sstream>
 #include <string>
 
 // ============================================================================
@@ -105,10 +105,10 @@ Status ProbeManager::loadAll() noexcept
 
     if (!std::filesystem::exists(m_probeDir))
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_FOUND,
             ErrorCategory::EBPF,
-            std::format("Probe directory does not exist: {}", m_probeDir.string())
+            "Probe directory does not exist: " + m_probeDir.string()
         ));
     }
 
@@ -149,10 +149,10 @@ Status ProbeManager::loadAll() noexcept
 
     if (lILoaded == 0)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_FOUND,
             ErrorCategory::EBPF,
-            std::format("No .bpf.o probes loaded from: {}", m_probeDir.string())
+            "No .bpf.o probes loaded from: " + m_probeDir.string()
         ));
     }
 
@@ -183,10 +183,10 @@ Status ProbeManager::loadOne(const std::filesystem::path& aBpfObjPath) noexcept
     bpf_object* lPObj = bpf_object__open_file(lSzPath.c_str(), &lOpenOpts);
     if (!lPObj || libbpf_get_error(lPObj))
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::SYSCALL_FAILED,
             ErrorCategory::EBPF,
-            std::format("bpf_object__open_file failed for: {}", lSzPath)
+            "bpf_object__open_file failed for: " + lSzPath
         ));
     }
 
@@ -198,10 +198,10 @@ Status ProbeManager::loadOne(const std::filesystem::path& aBpfObjPath) noexcept
     if (lIErr != 0)
     {
         bpf_object__close(lPObj);
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::SYSCALL_FAILED,
             ErrorCategory::EBPF,
-            std::format("bpf_object__load failed (errno {}): {}", -lIErr, lSzPath)
+            "bpf_object__load failed (errno " + std::to_string(-lIErr) + "): " + lSzPath
         ));
     }
 
@@ -237,6 +237,7 @@ Status ProbeManager::loadOne(const std::filesystem::path& aBpfObjPath) noexcept
             // Non-fatal: continue with other programs in this object
             continue;
         }
+        m_vAttachedLinks.push_back(lPLink);
         LOG_INFO(g_logEbpf, "ProbeManager: attached " << bpf_program__name(lPProg));
     }
 
@@ -252,6 +253,16 @@ Status ProbeManager::loadOne(const std::filesystem::path& aBpfObjPath) noexcept
 // ----------------------------------------------------------------------------
 void ProbeManager::unloadAll() noexcept
 {
+    // Destroy links first to cleanly detach probes before closing objects
+    for (struct bpf_link* lPLink : m_vAttachedLinks)
+    {
+        if (lPLink)
+        {
+            bpf_link__destroy(lPLink);
+        }
+    }
+    m_vAttachedLinks.clear();
+
     for (bpf_object* lPObj : m_vLoadedObjects)
     {
         if (lPObj)
@@ -316,7 +327,7 @@ Status RingBufferPoller::init() noexcept
 {
     if (m_iMapFd < 0)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::EBPF,
             "RingBufferPoller::init() called with invalid map fd"
@@ -331,10 +342,10 @@ Status RingBufferPoller::init() noexcept
     m_pRingBuf = ring_buffer__new(m_iMapFd, &RingBufferPoller::onSample, this, nullptr);
     if (!m_pRingBuf)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::SYSCALL_FAILED,
             ErrorCategory::EBPF,
-            std::format("ring_buffer__new failed (errno {}): {}", errno, std::strerror(errno))
+            std::string("ring_buffer__new failed (errno ") + std::to_string(errno) + "): " + std::strerror(errno)
         ));
     }
 
@@ -346,10 +357,10 @@ Status RingBufferPoller::init() noexcept
     m_iEpollFd = ::epoll_create1(EPOLL_CLOEXEC);
     if (m_iEpollFd < 0)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::SYSCALL_FAILED,
             ErrorCategory::EBPF,
-            std::format("epoll_create1 failed: {}", std::strerror(errno))
+            std::string("epoll_create1 failed: ") + std::strerror(errno)
         ));
     }
 
@@ -359,10 +370,10 @@ Status RingBufferPoller::init() noexcept
 
     if (::epoll_ctl(m_iEpollFd, EPOLL_CTL_ADD, lEv.data.fd, &lEv) != 0)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::SYSCALL_FAILED,
             ErrorCategory::EBPF,
-            std::format("epoll_ctl EPOLL_CTL_ADD failed: {}", std::strerror(errno))
+            std::string("epoll_ctl EPOLL_CTL_ADD failed: ") + std::strerror(errno)
         ));
     }
 
@@ -557,7 +568,7 @@ Status EbpfService::onInit()
 {
     if (m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::ALREADY_INITIALIZED,
             ErrorCategory::EBPF,
             "EbpfService::onInit() called twice"
@@ -584,7 +595,7 @@ Status EbpfService::onInit()
     int lIRingBufFd = m_probeManager.ringBufferMapFd();
     if (lIRingBufFd < 0)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_FOUND,
             ErrorCategory::EBPF,
             "EbpfService: no ring buffer map found after loading probes"
@@ -623,7 +634,7 @@ Status EbpfService::onStart()
 {
     if (!m_bInitialised)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::NOT_INITIALIZED,
             ErrorCategory::EBPF,
             "EbpfService::onStart() called before onInit()"
@@ -631,7 +642,7 @@ Status EbpfService::onStart()
     }
     if (m_bStarted)
     {
-        return std::unexpected(makeError(
+        return astra::unexpected(makeError(
             ErrorCode::ALREADY_INITIALIZED,
             ErrorCategory::EBPF,
             "EbpfService::onStart() called twice"
