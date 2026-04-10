@@ -38,7 +38,7 @@ namespace astra
 {
 
 // ----- unexpected ----------------------------------------------------------
-#if __has_include(<expected>)
+#ifdef __cpp_lib_expected
 
 template <typename E>
 using unexpected = std::unexpected<E>;
@@ -63,7 +63,7 @@ unexpected(E) -> unexpected<E>;
 #endif // unexpected
 
 // ----- expected<T,E> -------------------------------------------------------
-#if __has_include(<expected>)
+#ifdef __cpp_lib_expected
 
 template <typename T, typename E>
 using expected = std::expected<T, E>;

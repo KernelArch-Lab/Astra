@@ -75,6 +75,7 @@ inline const char* levelToString(Level aELevel) noexcept
 // This is intentionally simple. The eBPF layer (M-09) handles
 // structured telemetry. This logger is for human-readable diagnostics.
 // -------------------------------------------------------------------------
+__attribute__((format(printf, 5, 6)))
 inline void write(
     Level       aELevel,
     const char* aSzModule,
@@ -156,27 +157,27 @@ inline void write(
 //   ASTRA_LOG_SEC_ALERT("ipc", "HMAC mismatch on channel %u", channelId);
 // ============================================================================
 #define ASTRA_LOG_TRACE(module, fmt, ...) \
-    astra::log::write(astra::log::Level::TRACE, module, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+    astra::log::write(astra::log::Level::TRACE, module, __FILE__, __LINE__, fmt __VA_OPT__(,) __VA_ARGS__)
 
 #define ASTRA_LOG_DEBUG(module, fmt, ...) \
-    astra::log::write(astra::log::Level::DEBUG, module, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+    astra::log::write(astra::log::Level::DEBUG, module, __FILE__, __LINE__, fmt __VA_OPT__(,) __VA_ARGS__)
 
 #define ASTRA_LOG_INFO(module, fmt, ...) \
-    astra::log::write(astra::log::Level::INFO, module, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+    astra::log::write(astra::log::Level::INFO, module, __FILE__, __LINE__, fmt __VA_OPT__(,) __VA_ARGS__)
 
 #define ASTRA_LOG_WARN(module, fmt, ...) \
-    astra::log::write(astra::log::Level::WARN, module, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+    astra::log::write(astra::log::Level::WARN, module, __FILE__, __LINE__, fmt __VA_OPT__(,) __VA_ARGS__)
 
 #define ASTRA_LOG_ERROR(module, fmt, ...) \
-    astra::log::write(astra::log::Level::ERROR, module, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+    astra::log::write(astra::log::Level::ERROR, module, __FILE__, __LINE__, fmt __VA_OPT__(,) __VA_ARGS__)
 
 #define ASTRA_LOG_FATAL(module, fmt, ...) \
-    astra::log::write(astra::log::Level::FATAL, module, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+    astra::log::write(astra::log::Level::FATAL, module, __FILE__, __LINE__, fmt __VA_OPT__(,) __VA_ARGS__)
 
 #define ASTRA_LOG_SEC_ALERT(module, fmt, ...) \
-    astra::log::write(astra::log::Level::SEC_ALERT, module, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+    astra::log::write(astra::log::Level::SEC_ALERT, module, __FILE__, __LINE__, fmt __VA_OPT__(,) __VA_ARGS__)
 
 #define ASTRA_LOG_SEC_BREACH(module, fmt, ...) \
-    astra::log::write(astra::log::Level::SEC_BREACH, module, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+    astra::log::write(astra::log::Level::SEC_BREACH, module, __FILE__, __LINE__, fmt __VA_OPT__(,) __VA_ARGS__)
 
 #endif // ASTRA_COMMON_LOG_H
