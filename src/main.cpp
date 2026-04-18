@@ -17,6 +17,7 @@
 #include <astra/common/log.h>
 #include <astra/common/version.h>
 #include <astra/platform/platform.h>
+#include <astra/observability/observability_service.h>
 
 #include <csignal>
 #include <cstdlib>
@@ -212,6 +213,13 @@ int main(int aIArgc, char* aArrArgv[])
     g_pRuntime = &lRuntime;
 
     astra::Status lInitStatus = lRuntime.init(lConfig);
+    // -----------------------------------------------------------------
+// Register Observability Service (M-09)
+// -----------------------------------------------------------------
+lRuntime.services().registerService(
+    new astra::observability::ObservabilityService(lRuntime),
+    lRuntime.rootCapability()
+);
     if (!lInitStatus.has_value())
     {
         const astra::Error& lError = lInitStatus.error();

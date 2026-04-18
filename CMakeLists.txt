@@ -181,6 +181,7 @@ add_subdirectory(src/allocator) # M-06: Memory Allocator (Sprint 1)
 # add_subdirectory(src/jobengine)
 # add_subdirectory(src/ai)
 add_subdirectory(src/ebpf)       # M-09: eBPF Observability (Sprint 1)
+add_subdirectory(src/observability)
 # add_subdirectory(src/wasm)
 # add_subdirectory(src/aql)
 # add_subdirectory(src/verify)
@@ -202,6 +203,7 @@ target_link_libraries(astra_runtime
     PRIVATE
         astra_core
         astra_asm_core
+        astra_observability
         pthread
         dl
 )
