@@ -26,8 +26,16 @@ inline constexpr SizeT CACHE_LINE_SIZE = 64;
 
 struct alignas(CACHE_LINE_SIZE) ChannelControlLineWrite
 {
+    // Committed write index — readers observe this to know what is safe to read.
     std::atomic<U64> m_uWriteIndex {0};
-    std::array<std::byte, CACHE_LINE_SIZE - sizeof(std::atomic<U64>)> m_arrPadding {};
+
+    // Claim index — writers advance this first to reserve their slot (MPSC coordination).
+    //   <= 256 B payload : claimed via fetch_add  (wait-free, single atomic op)
+    //    > 256 B payload : claimed via CAS loop   (lock-free, bounded retries)
+    // In SPSC mode write_index == write_claim_index at all times.
+    std::atomic<U64> m_uWriteClaimIndex {0};
+
+    std::array<std::byte, CACHE_LINE_SIZE - 2 * sizeof(std::atomic<U64>)> m_arrPadding {};
 };
 
 struct alignas(CACHE_LINE_SIZE) ChannelControlLineRead

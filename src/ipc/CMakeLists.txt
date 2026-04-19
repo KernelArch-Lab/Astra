@@ -5,6 +5,7 @@
 
 add_library(astra_ipc STATIC
     ChannelFactory.cpp
+    RingBuffer.cpp
 )
 
 target_include_directories(astra_ipc
