@@ -645,7 +645,7 @@ void DemoService::demoSecurityViolation()
         }
     }
 
-    printInfo("");
+    printInfo(" ");
     printInfo("  Even if an attacker compromises the network module,");
     printInfo("  they CANNOT read files, spawn processes, or escalate.");
     printInfo("  The damage is structurally bounded by the token.");
