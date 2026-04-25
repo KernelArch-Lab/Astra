@@ -109,11 +109,3 @@ Thumbs.db
 *.tmp
 *.bak
 *.log
-
-# in .gitignore
-test_s1
-test_s1_ext
-test_s2
-test_s2_mpsc
-test_s3
-my_test
