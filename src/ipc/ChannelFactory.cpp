@@ -218,7 +218,7 @@ Result<Channel> ChannelFactory::createChannel(
 {
     if (aUChannelId == 0)
     {
-        return astra::unexpected(makeError(
+        return std::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::IPC,
             "Channel ID must be non-zero"
@@ -227,7 +227,7 @@ Result<Channel> ChannelFactory::createChannel(
 
     if (aURingBufferBytes == 0)
     {
-        return astra::unexpected(makeError(
+        return std::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::IPC,
             "Ring buffer bytes must be greater than zero"
@@ -237,7 +237,7 @@ Result<Channel> ChannelFactory::createChannel(
     const SizeT lUMappedBytes = roundUpToPage(sizeof(ChannelControlBlock) + aURingBufferBytes);
     if (lUMappedBytes > static_cast<SizeT>(UINT32_MAX))
     {
-        return astra::unexpected(makeError(
+        return std::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::IPC,
             "Mapped channel size exceeds Sprint 1 metadata limits"
@@ -253,12 +253,12 @@ Result<Channel> ChannelFactory::createChannel(
     UniqueFd lFd(createMemfd(lSzName));
     if (!lFd.isValid())
     {
-        return astra::unexpected(makeErrnoError(ErrorCode::SYSCALL_FAILED, "memfd_create failed"));
+        return std::unexpected(makeErrnoError(ErrorCode::SYSCALL_FAILED, "memfd_create failed"));
     }
 
     if (::ftruncate(lFd.get(), static_cast<off_t>(lUMappedBytes)) != 0)
     {
-        return astra::unexpected(makeErrnoError(ErrorCode::SYSCALL_FAILED, "ftruncate failed"));
+        return std::unexpected(makeErrnoError(ErrorCode::SYSCALL_FAILED, "ftruncate failed"));
     }
 
     auto lResult = mapOwnedFd(aUChannelId, std::move(lFd), lUMappedBytes);
@@ -271,6 +271,7 @@ Result<Channel> ChannelFactory::createChannel(
     ChannelControlBlock* lPControl = lChannel.control();
     std::construct_at(lPControl);
     lPControl->m_write.m_uWriteIndex.store(0, std::memory_order_relaxed);
+    lPControl->m_write.m_uWriteClaimIndex.store(0, std::memory_order_relaxed);
     lPControl->m_read.m_uReadIndex.store(0, std::memory_order_relaxed);
     lPControl->m_meta.m_uChannelId = aUChannelId;
     lPControl->m_meta.m_uControlBytes = static_cast<U32>(sizeof(ChannelControlBlock));
@@ -295,7 +296,7 @@ Result<Channel> ChannelFactory::mapExistingChannel(
 {
     if (aIFd < 0)
     {
-        return astra::unexpected(makeError(
+        return std::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::IPC,
             "Cannot map channel from invalid fd"
@@ -305,7 +306,7 @@ Result<Channel> ChannelFactory::mapExistingChannel(
     const int lIDupFd = ::fcntl(aIFd, F_DUPFD_CLOEXEC, 0);
     if (lIDupFd < 0)
     {
-        return astra::unexpected(makeErrnoError(ErrorCode::SYSCALL_FAILED, "fcntl(F_DUPFD_CLOEXEC) failed"));
+        return std::unexpected(makeErrnoError(ErrorCode::SYSCALL_FAILED, "fcntl(F_DUPFD_CLOEXEC) failed"));
     }
 
     return mapOwnedFd(aUChannelId, UniqueFd(lIDupFd), aUMappedBytes);
@@ -319,7 +320,7 @@ Result<Channel> ChannelFactory::mapOwnedFd(
 {
     if (!aFd.isValid())
     {
-        return astra::unexpected(makeError(
+        return std::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::IPC,
             "ChannelFactory received an invalid memfd"
@@ -328,7 +329,7 @@ Result<Channel> ChannelFactory::mapOwnedFd(
 
     if (aUMappedBytes < sizeof(ChannelControlBlock))
     {
-        return astra::unexpected(makeError(
+        return std::unexpected(makeError(
             ErrorCode::INVALID_ARGUMENT,
             ErrorCategory::IPC,
             "Mapped size must include the control block"
@@ -344,7 +345,7 @@ Result<Channel> ChannelFactory::mapOwnedFd(
 
     if (lPMapping == MAP_FAILED)
     {
-        return astra::unexpected(makeErrnoError(ErrorCode::SYSCALL_FAILED, "mmap failed"));
+        return std::unexpected(makeErrnoError(ErrorCode::SYSCALL_FAILED, "mmap failed"));
     }
 
     return Channel(aUChannelId, std::move(aFd), lPMapping, aUMappedBytes);
