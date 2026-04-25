@@ -50,7 +50,7 @@ struct alignas(4) ControlMessage
 };
 static_assert(sizeof(ControlMessage) == 32U);
 
-struct alignas(4) AnomalyAlert
+struct alignas(8) AnomalyAlert
 {
     U64 m_uTimestampNs;
     U32 m_uScopeHash;
@@ -59,7 +59,7 @@ struct alignas(4) AnomalyAlert
 };
 static_assert(sizeof(AnomalyAlert) == 48U);
 
-struct alignas(4) EbpfMetricPacket
+struct alignas(8) EbpfMetricPacket
 {
     U64 m_uTimestampNs;
     U32 m_uTracepoint;

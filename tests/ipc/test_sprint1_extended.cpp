@@ -54,7 +54,7 @@ struct alignas(4) ControlMessage
 static_assert(sizeof(ControlMessage) == 32U, "ControlMessage must be 32 bytes");
 
 // ---- Minimal anomaly alert payload (M-08 -> M-01) ------------------------
-struct alignas(4) AnomalyAlert
+struct alignas(8) AnomalyAlert
 {
     U64 m_uTimestampNs;
     U32 m_uScopeHash;

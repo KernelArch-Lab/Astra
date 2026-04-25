@@ -379,6 +379,8 @@ bool test_skip_sentinel_handled_transparently()
             if (lOutBuf[lUI] != lUFirst) ++lICorrupt;
     }
 
+    test_assert(lIReadBack == lISucceeded.load(),
+                "Drained message count matches successful writes");
     test_assert(lICorrupt == 0, "No payload corruption after SKIP-sentinel scenario");
     return test_assert(lConsumer.isEmpty(),
                 "Ring is clean and empty after draining with SKIP sentinels");
