@@ -3,34 +3,27 @@
 // include/astra/isolation/namespace_manager.h
 //
 // NamespaceManager creates Linux namespaces for a sandboxed process.
-// For Sprint 1, it implements USER namespace + PID namespace in that order.
 //
-// WHY the order USER → PID matters:
-//   On Linux, creating a PID namespace from an UNPRIVILEGED process
-//   requires the process to first be inside a USER namespace where it
-//   has mapped itself to a UID that has the privilege. Without creating
-//   the USER namespace first, unshare(CLONE_NEWPID) will fail with
-//   EPERM (permission denied) for a non-root process.
+// Sprint 1: USER namespace + PID namespace
+// Sprint 2: adds MOUNT namespace (CLONE_NEWNS) + sandbox filesystem setup
+//           via mount(2) / pivot_root(2).
 //
-// What each namespace does:
+// Namespace creation order (mandatory):
+//   USER → PID → MOUNT
 //
-//   USER namespace:
-//     Gives the process its own uid/gid map. Inside the namespace,
-//     the process sees itself as UID 0 (root). Outside, it maps to
-//     UID 65534 (nobody). This means the process can do things that
-//     appear to be root operations inside its own namespace (like
-//     creating other namespaces) but has NO real host privileges.
+//   USER must come first — every other namespace operation from an
+//   unprivileged process requires the UID mapping to be in place.
 //
-//   PID namespace:
-//     The process inside sees itself as PID 1. It cannot see or signal
-//     any processes in the host PID namespace. /proc inside a proper
-//     PID namespace would only show processes within that namespace.
+//   MOUNT comes after USER+PID because pivot_root needs the process to
+//   already be in its own mount namespace; otherwise we would pivot the
+//   host filesystem.
 //
-// State machine:
-//   INIT → USER_CREATED → MAPPED → PID_CREATED → ACTIVE
+// State machine (Sprint 2 adds two new states):
+//   INIT → USER_CREATED → MAPPED → PID_CREATED → MOUNT_CREATED
+//        → FS_PIVOTED → ACTIVE
 //
-//   Each state transition is atomic. If any step fails, rollback()
-//   undoes all previous steps in reverse order.
+//   Each state transition is atomic. rollback() unwinds exactly as far
+//   as setup() got before a failure.
 //
 // ScopedFd:
 //   A small RAII wrapper that closes a file descriptor on destruction.
@@ -45,6 +38,7 @@
 
 #include <atomic>
 #include <string>
+#include <sys/types.h>      // mode_t (used by ensureDir)
 
 namespace astra
 {
@@ -134,6 +128,8 @@ private:
 //
 // Each value represents a completed step. We track this so that
 // rollback() knows exactly how far to unwind.
+//
+// Sprint 2 adds MOUNT_CREATED and FS_PIVOTED between PID_CREATED and ACTIVE.
 // -------------------------------------------------------------------------
 enum class NamespaceState : U8
 {
@@ -141,7 +137,9 @@ enum class NamespaceState : U8
     USER_CREATED    = 1,    // unshare(CLONE_NEWUSER) succeeded
     MAPPED          = 2,    // uid_map / gid_map written
     PID_CREATED     = 3,    // unshare(CLONE_NEWPID) succeeded
-    ACTIVE          = 4     // all namespaces ready, sandbox is running
+    MOUNT_CREATED   = 4,    // unshare(CLONE_NEWNS) succeeded  [Sprint 2]
+    FS_PIVOTED      = 5,    // sandbox fs built + pivot_root done [Sprint 2]
+    ACTIVE          = 6     // all namespaces ready, sandbox is running
 };
 
 
@@ -154,17 +152,20 @@ enum class NamespaceState : U8
 // Usage flow (called from within the child process after fork):
 //
 //   NamespaceManager mgr;
-//   auto st = mgr.setup(profile, hostPid, insidePid);
+//   auto st = mgr.setup(profile, hostUid, hostGid);
 //   if (!st) { /* handle error */ }
-//   // now inside USER + PID namespaces
+//   // now inside USER + PID [+ MOUNT] namespaces
 //
-// The setup() method must be called from the CHILD process side of the
-// fork, not the parent. This is because unshare() modifies the calling
-// process's namespace membership.
+// setup() must be called from the CHILD process side of the fork because
+// unshare() modifies the calling process's namespace membership.
 // -------------------------------------------------------------------------
 class NamespaceManager
 {
 public:
+    // Path under which per-sandbox root filesystems are created.
+    // Each sandbox gets: SANDBOX_BASE_PATH + "/" + pid-as-string + "/"
+    static constexpr const char* SANDBOX_BASE_PATH = "/tmp/astra_sandbox";
+
     NamespaceManager();
     ~NamespaceManager();
 
@@ -177,8 +178,11 @@ public:
     // ---------------------------------------------------------------
     // setup() — main entry point.
     //
-    // Creates USER namespace, writes UID/GID mappings, then creates
-    // PID namespace. Must be called from inside the child process.
+    // Creates namespaces in order: USER → PID → MOUNT (if requested).
+    // For MOUNT namespace: also builds the sandbox filesystem and calls
+    // pivot_root() so the process root becomes the sandbox root.
+    //
+    // Must be called from inside the child process after fork().
     //
     // Parameters:
     //   aProfile     — the SandboxProfile from ProfileEngine
@@ -186,8 +190,7 @@ public:
     //   aUHostGid    — the real GID of the parent process (host side)
     //
     // Returns:
-    //   Status::ok()  on success (all namespaces created + mapped)
-    //   Error         on any failure (rollback already performed)
+    //   Status  (void on success, Error on failure — rollback done internally)
     // ---------------------------------------------------------------
     Status setup(const SandboxProfile& aProfile,
                  U32                   aUHostUid,
@@ -213,29 +216,64 @@ private:
     // Kept open so the namespace is not destroyed as long as this object lives.
     ScopedFd m_fdUserNs;    // /proc/self/ns/user
     ScopedFd m_fdPidNs;     // /proc/self/ns/pid
+    ScopedFd m_fdMountNs;   // /proc/self/ns/mnt  [Sprint 2]
+
+    // The sandbox root directory path for this instance. [Sprint 2]
+    // Set in createMountNamespace(), used by buildSandboxFilesystem()
+    // and cleanupSandboxRoot().
+    std::string m_szSandboxRoot;
 
     // ---------------------------------------------------------------
-    // Private step functions — each does one specific thing and
-    // returns an error if it fails.
+    // Sprint 1 private steps
     // ---------------------------------------------------------------
 
     // Step 1: call unshare(CLONE_NEWUSER) to enter a new user namespace
     Status createUserNamespace();
 
-    // Step 2: write uid_map and gid_map files so the kernel knows
-    //         how to translate UIDs between inside and outside
+    // Step 2: write uid_map and gid_map so the kernel knows how to
+    //         translate UIDs between inside and outside the namespace
     Status writeUidGidMaps(U32 aUHostUid, U32 aUHostGid);
 
     // Step 3: call unshare(CLONE_NEWPID) to enter a new PID namespace
     Status createPidNamespace();
 
-    // Helper: open the namespace fd from /proc/self/ns/<name>
-    // and store it in the given ScopedFd
+    // ---------------------------------------------------------------
+    // Sprint 2 private steps
+    // ---------------------------------------------------------------
+
+    // Step 4: call unshare(CLONE_NEWNS) to enter a new mount namespace.
+    //         Builds m_szSandboxRoot and pins /proc/self/ns/mnt fd.
+    Status createMountNamespace();
+
+    // Step 5: construct a minimal tmpfs root under m_szSandboxRoot,
+    //         bind-mount /usr/lib and /usr/share read-only, then call
+    //         pivot_root() and unmount the old root.
+    Status buildSandboxFilesystem();
+
+    // Cleanup helper: attempt to unmount and remove m_szSandboxRoot.
+    // Called from rollback() on a best-effort basis (noexcept).
+    void cleanupSandboxRoot() noexcept;
+
+    // ---------------------------------------------------------------
+    // Shared helpers
+    // ---------------------------------------------------------------
+
+    // Open /proc/self/ns/<aSzNsName> and store the fd in aFdOut.
     static Status openNsFd(const char* aSzNsName, ScopedFd& aFdOut);
 
-    // Helper: write a single string to a /proc file
+    // Write aSzContent to the /proc file at aSzPath using write(2).
     static Status writeProcFile(const std::string& aSzPath,
                                 const std::string& aSzContent);
+
+    // Create directory at aSzPath with the given mode (default 0755) if it
+    // does not already exist. Returns ok if the directory already exists
+    // (does NOT chmod an existing directory — caller must rely on the dir
+    // having been created with the desired mode the first time).
+    //
+    // Pass 0700 for the SANDBOX_BASE_PATH so other host users cannot
+    // enumerate active sandbox PIDs on a multi-tenant box.
+    static Status ensureDir(const std::string& aSzPath,
+                            mode_t             aMode = 0755);
 };
 
 } // namespace isolation

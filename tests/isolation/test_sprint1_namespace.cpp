@@ -178,6 +178,14 @@ static int runChildTests()
 // 2. Fork a child
 // 3. In the child: call NamespaceManager::setup(), then runChildTests()
 // 4. In the parent: verify child's real Linux PID is not 1, wait for exit
+//
+// NOTE (post-Sprint-2): The PARANOID profile sets m_nsFlags.m_bMount = true,
+// which means NamespaceManager::setup() now also runs createMountNamespace()
+// and buildSandboxFilesystem() (tmpfs + bind mounts + pivot_root) for this
+// test. The Sprint 1 assertions still only check getpid() == 1 and
+// getuid() == 0, but the code path is broader than it was originally — a
+// regression in the Sprint 2 mount/pivot logic will surface here too,
+// not just in test_sprint2_mount.
 // ============================================================================
 int main()
 {
