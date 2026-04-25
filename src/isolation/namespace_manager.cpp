@@ -462,10 +462,16 @@ Status NamespaceManager::buildSandboxFilesystem()
 {
     // ── A. Create base directory structure on the HOST filesystem ─────────────
     // These are created before the tmpfs mount so we have a place to mount to.
-
-    Status lSt = ensureDir(SANDBOX_BASE_PATH);
+    //
+    // The SANDBOX_BASE_PATH (/tmp/astra_sandbox) is shared across every sandbox
+    // that runs on this host. Using mode 0700 prevents other local users from
+    // enumerating active sandbox PIDs (each per-PID directory below it would
+    // otherwise be world-readable through directory traversal).
+    Status lSt = ensureDir(SANDBOX_BASE_PATH, 0700);
     if (!lSt.has_value()) return lSt;
 
+    // The per-PID dir keeps the default 0755 — the sandbox process needs to
+    // traverse it to reach its own root, and the parent path is already 0700.
     lSt = ensureDir(m_szSandboxRoot);
     if (!lSt.has_value()) return lSt;
 
@@ -727,14 +733,21 @@ Status NamespaceManager::writeProcFile(const std::string& aSzPath,
 }
 
 // ============================================================================
-// ensureDir() — create aSzPath with mode 0755 if it does not already exist.
+// ensureDir() — create aSzPath with mode aMode (default 0755) if it does
+// not already exist.
 //
 // mkdir(2) returns EEXIST when the directory is already present — that is
 // not an error for us, so we filter it out. Any other errno is a real error.
+//
+// Note: when EEXIST is returned we do NOT chmod the existing directory.
+// Callers that care about the mode (e.g. the SANDBOX_BASE_PATH at 0700)
+// must rely on having created the directory with the right mode the first
+// time around. This is acceptable because the base path lives under /tmp
+// and is created by the first sandbox to start up on the host.
 // ============================================================================
-Status NamespaceManager::ensureDir(const std::string& aSzPath)
+Status NamespaceManager::ensureDir(const std::string& aSzPath, mode_t aMode)
 {
-    if (::mkdir(aSzPath.c_str(), 0755) != 0)
+    if (::mkdir(aSzPath.c_str(), aMode) != 0)
     {
         int lIErrno = errno;
         if (lIErrno != EEXIST)

@@ -38,6 +38,7 @@
 
 #include <atomic>
 #include <string>
+#include <sys/types.h>      // mode_t (used by ensureDir)
 
 namespace astra
 {
@@ -264,9 +265,15 @@ private:
     static Status writeProcFile(const std::string& aSzPath,
                                 const std::string& aSzContent);
 
-    // Create directory at aSzPath (mode 0755) if it does not exist.
-    // Returns ok if the directory already exists.
-    static Status ensureDir(const std::string& aSzPath);
+    // Create directory at aSzPath with the given mode (default 0755) if it
+    // does not already exist. Returns ok if the directory already exists
+    // (does NOT chmod an existing directory — caller must rely on the dir
+    // having been created with the desired mode the first time).
+    //
+    // Pass 0700 for the SANDBOX_BASE_PATH so other host users cannot
+    // enumerate active sandbox PIDs on a multi-tenant box.
+    static Status ensureDir(const std::string& aSzPath,
+                            mode_t             aMode = 0755);
 };
 
 } // namespace isolation
