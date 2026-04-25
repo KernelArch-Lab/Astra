@@ -392,6 +392,28 @@ Status NamespaceManager::createMountNamespace()
         ));
     }
 
+    // ── Make the cloned mount tree MS_PRIVATE recursively ───────────────────
+    // unshare(CLONE_NEWNS) copies the host mount table verbatim, including its
+    // propagation flags. On systemd-based distros (Ubuntu / Fedora / Debian /
+    // Arch / Alpine on systemd / etc.) the root mount is MS_SHARED by default.
+    // Two things go wrong if we don't override that here:
+    //   1. Mounts performed inside the sandbox propagate back to the host —
+    //      the entire point of an isolated mount namespace is defeated.
+    //   2. pivot_root(2) returns EINVAL when new_root or its parent has
+    //      MS_SHARED propagation (see man 2 pivot_root), so the rest of
+    //      buildSandboxFilesystem() would fail on every standard host.
+    // MS_REC applies the change to every sub-mount as well, so subsequent
+    // bind mounts inherit private propagation.
+    if (::mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr) != 0)
+    {
+        int lIErrno = errno;
+        return std::unexpected(makeError(
+            ErrorCode::NAMESPACE_SETUP_FAILED,
+            ErrorCategory::ISOLATION,
+            std::string("mount(/, MS_REC|MS_PRIVATE) failed: ") + strerror(lIErrno)
+        ));
+    }
+
     // Build the per-sandbox root path: /tmp/astra_sandbox/<pid>
     // getpid() here still returns the host PID (we are in the process
     // that called unshare, not a forked child yet). That is intentional —
