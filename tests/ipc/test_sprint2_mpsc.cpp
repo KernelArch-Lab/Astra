@@ -379,8 +379,12 @@ bool test_skip_sentinel_handled_transparently()
             if (lOutBuf[lUI] != lUFirst) ++lICorrupt;
     }
 
-    test_assert(lIReadBack == lISucceeded.load(),
-                "Drained message count matches successful writes");
+    // Ring at drain time held: (lIFilled - 1) leftover fill messages from
+    // the setup, plus whichever concurrent writes succeeded. SKIP sentinels
+    // are consumed silently by RingBuffer::read so they don't count here.
+    const int lIExpectedDrain = (lIFilled - 1) + lISucceeded.load();
+    test_assert(lIReadBack == lIExpectedDrain,
+                "Drained count == fill remainder + successful concurrent writes");
     test_assert(lICorrupt == 0, "No payload corruption after SKIP-sentinel scenario");
     return test_assert(lConsumer.isEmpty(),
                 "Ring is clean and empty after draining with SKIP sentinels");
