@@ -79,3 +79,22 @@ target_link_libraries(demo_ipc_live
         pthread
 )
 message(STATUS "  [M-03] demo_ipc_live configured")
+
+# Latency microbenchmark — Track B Sprint 3 of the Paper 1 prep.
+# rdtscp + HDR-style percentiles. CI runs the threaded mode with a
+# small sample count; the full Paper 1 figure is generated on a tuned
+# host with --samples 1000000.
+add_executable(bench_ipc_latency
+    bench_latency.cpp
+)
+target_link_libraries(bench_ipc_latency
+    PRIVATE
+        astra_ipc
+        astra_core
+        pthread
+)
+add_test(
+    NAME    Sprint3IpcLatencyBench
+    COMMAND bench_ipc_latency --threaded --warmup 1000 --samples 5000
+)
+message(STATUS "  [M-03] bench_ipc_latency configured")
