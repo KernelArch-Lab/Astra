@@ -36,6 +36,9 @@ compile_commands.json
 *.cmake
 !cmake/**/*.cmake
 !CMakeLists.txt
+# Hand-written Makefiles under formal/ drive verification tools
+# (CBMC etc.) and are NOT CMake-generated. Keep them tracked.
+!formal/**/Makefile
 
 # IDE and editor files
 .vscode/
