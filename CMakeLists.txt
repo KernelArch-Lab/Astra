@@ -235,6 +235,8 @@ if(ASTRA_ENABLE_TESTS)
     message(STATUS "Test suite enabled (IPC Sprint 1)")
     add_subdirectory(tests/ebpf)
     message(STATUS "Test suite enabled (M-09 eBPF tests)")
+    add_subdirectory(tests/asm_core)
+    message(STATUS "Test suite enabled (M-21 ASM Core NASM ports)")
 endif()
 
 # --------------------------------------------------------------------------
