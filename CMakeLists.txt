@@ -237,6 +237,8 @@ if(ASTRA_ENABLE_TESTS)
     message(STATUS "Test suite enabled (M-09 eBPF tests)")
     add_subdirectory(tests/bench)
     message(STATUS "Test suite enabled (Paper 1 baseline harnesses)")
+    add_subdirectory(tests/asm_core)
+    message(STATUS "Test suite enabled (M-21 ASM Core NASM ports)")
 endif()
 
 # --------------------------------------------------------------------------
