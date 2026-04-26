@@ -65,39 +65,108 @@ first submission. This is the lower-risk option compared to SOSP 2027
 
 ---
 
-## Paper 1 — Capability-Gated Zero-Copy IPC
+## Paper 1 — Capability-Gated Zero-Copy IPC on Stock Linux
 
 **Submission target**: USENIX ATC 2027, January 2027 (~9 months out).
 
-**Core claim** (one sentence): capability-validated memfd IPC reaches
-within X% of raw shared-memory throughput on stock Linux while supporting
-O(1) cascading revocation that no other userspace runtime offers.
+**Refined thesis** (after the 2026-04-27 prior-art survey across
+Claude / Gemini Deep Research / ChatGPT Deep Research):
+
+> Astra Runtime is the first userspace runtime to enforce
+> capability-token-mediated access control on a zero-copy IPC fastpath
+> on stock Linux, without kernel modification, special hardware
+> (CHERI / Morello), or hypervisor support. We show the capability
+> check costs less than X ns per message in steady state, keeping
+> single-host IPC latency within Y % of Aeron's published 250 ns
+> RTT floor while delivering Cornucopia-Reloaded-class O(1)
+> revocation latency in software at the application layer.
+
+X and Y are placeholders; running those microbenchmarks is the
+empirical core of the paper.
+
+**Explicitly NOT claimed as algorithmic novelty:**
+
+- **O(1) cascading revocation** as an algorithm — Redell 1974
+  published the single-indirection revoker pattern; KeyKOS / EROS /
+  CapROS use it (Shapiro 1999); Cornucopia Reloaded (Filardo,
+  ASPLOS '24) and PICASSO (S&P '24) use the same shared-epoch /
+  bulk-invalidation pattern in CHERI; AWS holds US patent
+  9,847,983 on the same idea applied to web IAM tokens. Astra
+  reuses the pattern; the contribution is the **first software-only
+  Linux-userspace realization with measured µs numbers**.
+- **memfd + mmap zero-copy IPC** as a substrate — Aeron has shipped
+  this in production for 8+ years (~250 ns RTT for 100 B IPC),
+  ByteDance shmipc productionized the same template, Firefox /
+  Chromium use `memfd_create` since 2018, io_uring's SQ/CQ design
+  IS the same template. Astra reuses the substrate; the
+  contribution is the **token gate sitting on the wait-free MPSC
+  fastpath without losing the Aeron-class latency floor**.
+- **The 7 NASM constant-time primitives** (ct_compare, secure_wipe,
+  rdrand64, lfence, cache_flush, ct_select, stack_canary) — every
+  modern hardened crypto library ships equivalents (libsodium's
+  `crypto_verify` / `sodium_memzero`, BoringSSL, OpenSSL). Mention
+  in the implementation section as engineering hygiene only.
+
+**Closest competitors (cite in Related Work, do not reproduce)**:
+
+- **HongMeng (OSDI '24)** — Linux-compatible production microkernel
+  with caps + IPC fastpath, but **below** the kernel, not above it.
+  HongMeng explicitly retreated from chain-revocable caps to
+  "address tokens" because revocation cost was hurting common-case
+  performance. Astra's framing must be "above-the-kernel" and must
+  show it doesn't hit the same wall HongMeng did.
+- **CAP-VMs (OSDI '22)** — capability + IPC for cloud microservices,
+  but requires CHERI / Morello hardware. Astra's framing must
+  include "no special hardware" explicitly.
+- **LITESHIELD (USENIX ATC '25)** — userspace μkernel-style on
+  Linux with shared-memory IPC and ~22-syscall host interface,
+  but **no capability layer**. Astra's framing must claim *the
+  capability layer over* that architectural shape. Same venue
+  as the Astra submission target — both a citation opportunity
+  and a comparison risk.
+
+No 2024–2026 SOSP / OSDI / ATC / EuroSys paper matches the full
+combination *capability-mediated userspace IPC on stock Linux,
+no kernel patch, no CHERI hardware*.
 
 **What must land before submission**:
 
-1. M-21 NASM ports of `ct_compare`, `rdrand64`, `lfence`, `cache_flush`,
-   `secure_wipe` — replace the C++ stubs in
-   [src/asm_core/](../src/asm_core/) with hand-written assembly. The
-   constant-time claims in the paper require this.
+1. M-21 NASM ports — done on `feature/m21-nasm-ports`.
 2. CBMC bounded-model-check of capability monotonicity in
-   [src/core/capability.cpp](../src/core/capability.cpp). One verified
-   property is a real result; promise of verification is not. Output
-   lives at `formal/cbmc/capability_monotonicity.c`.
-3. RDTSC-bounded latency harness in [tests/ipc/](../tests/ipc/)
-   producing HDR histograms. CI gate on regression.
-4. Tail-latency comparison framework under `benchmarks/`.
+   [`formal/cbmc/capability_monotonicity.c`](../formal/cbmc/capability_monotonicity.c)
+   — done on `feature/m21-nasm-ports`. **Reframed as
+   spec-correspondence CI gate**, not novel formal verification.
+   Cite Klein 2009 and Shapiro 1999 upfront.
+3. RDTSC-bounded latency harness in
+   [`tests/ipc/bench_latency.cpp`](../tests/ipc/bench_latency.cpp)
+   — done on `feature/m21-nasm-ports`.
+4. **M-01 hash-indexed `validate()` fast path** — replaces the
+   current O(n) scan over the 4096-token pool with a hash lookup.
+   Without this, the per-message gate cost destroys the Aeron-class
+   comparison.
+5. **M-03 `RingBuffer::write/read` capability gate wiring** —
+   small coordinated PR for the M-03 owners (Laakhi, Srivatsan).
+   1-line call-site change once (4) lands.
+6. **Aeron + io_uring + eRPC baseline harnesses** under
+   `tests/bench/`, in the same TSC domain as `bench_latency.cpp`.
 
 **Required experiments**:
 
 | Comparison axis | Baselines |
 |---|---|
-| p50 / p99 / p99.99 latency | raw memfd, Unix socket, io_uring, Aeron, Cap'n Proto RPC, eRPC |
+| p50 / p99 / p99.99 latency | Aeron (primary), io_uring (primary, Linux 6.7+ with SQPOLL), eRPC (primary, NSDI '19 reference), raw memfd (control) |
 | Throughput across 1, 4, 16, 64 producer-consumer pairs | same |
 | Revocation latency (`revoke()` to first rejected message) | sweep across token-pool sizes |
-| Macrobench (NGINX / Redis / SQLite) | with capability validation on each call vs. without |
+| Macrobench (NGINX / Redis / SQLite) | gVisor (KVM platform) for the syscall-interception comparison; not reproduced for Firecracker / HongMeng / LITESHIELD / CAP-VMs (cited only) |
+| Cap-gate cost per message | Astra with gate disabled vs enabled, isolating the validate cost |
 
-**Risk**: Low. M-03 already ships; the work is measurement plus the
-ASM ports.
+**Cap'n Proto RPC** dropped from latency baselines — it's RPC over
+a transport, not a transport, so the comparison is apples-to-oranges.
+
+**Risk**: medium-high. Without the M-01 fast path (4) and M-03 gate
+wiring (5), the paper has no measurable IPC + cap story. Aeron
+beat-by-2× and HongMeng-overlap are both HIGH risks with explicit
+mitigation paths (see risk register).
 
 ---
 
