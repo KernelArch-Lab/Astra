@@ -27,29 +27,50 @@ Last updated: 2026-04-26 (against `main` at commit `eac9600`).
 
 ## What Astra is
 
-**Astra Runtime** is a modular, capability-based, cybersecurity-hardened,
-AI-augmented userspace runtime for Linux built by KernelArch Labs. It is a
-*userspace kernel* — a supervisor that runs above Linux and orchestrates
-sandboxed processes without kernel patches.
+**Astra Runtime** is a userspace runtime that gates every zero-copy
+memfd IPC channel on stock Linux through unforgeable capability
+tokens with epoch-based cascading revocation, achieving
+sub-microsecond validated message delivery without kernel
+modifications. Built by KernelArch Labs, it is a *userspace kernel*
+— a supervisor that runs above Linux and orchestrates sandboxed
+processes without kernel patches.
 
-The thesis is that Rust and Go solve compile-time memory safety but not
-hardware-level threats (side-channels, cache-timing attacks). SELinux and
-AppArmor operate at the wrong abstraction layer. No existing open-source
-platform combines:
+The defensible technical claim is narrow and falsifiable:
+**capability-mediated IPC can match raw shared-memory throughput
+while supporting global O(1) revocation — a combination not
+available in seL4 (no Linux), gVisor (no capabilities), or
+Firecracker (no IPC model)**.
 
-- Capability-based access control with cryptographic tokens
-- Zero-copy IPC with HMAC-protected channels
-- Hardware-enforced sandboxing (namespaces, seccomp, cgroups)
-- AI-driven anomaly detection
-- Deterministic forensic replay
-- Formal verification of the capability model
+### What Astra actually has today (April 2026)
 
-— in userspace, in one runtime. Astra targets that gap.
+Of the five pillars previously claimed in the project pitch, **only
+the first three are built**:
 
-**Defence in depth** for untrusted code is built up as seven concentric
-layers: namespace isolation, seccomp-BPF filtering, capability-scoped
-permissions, allocator hardening, CFI enforcement, cryptographic IPC
-integrity, and AI behavioural monitoring.
+| Pillar | Status | Where |
+|---|---|---|
+| Capability tokens + zero-copy IPC | **Built** | `src/core/`, `src/ipc/` |
+| Hardware-enforced namespace + tmpfs sandbox | **Built** | `src/isolation/` |
+| Pool allocator + libbpf observability | **Built** (engineering plumbing) | `src/allocator/`, `src/ebpf/` |
+| Deterministic forensic replay | **Reserved** | `src/checkpoint/`, `src/replay/` empty |
+| AI-driven anomaly detection | **Reserved** | `src/ai/` empty |
+| Formal verification of capability model | **Reserved** | `formal/coq`, `formal/tlaplus`, `formal/cbmc` all empty |
+
+The empty rows are listed as *future work* in the README and in the
+[Publication Strategy](PUBLICATION_STRATEGY.md). Reviewers and
+contributors should treat any feature claim that isn't anchored to a
+"Built" row as planning-language rather than a capability of the
+current artifact. This is a deliberate honesty stance: we'd rather
+under-claim publicly than be caught by a reviewer who clones the repo.
+
+### Defence in depth (planned)
+
+The project's eventual seven-layer defence-in-depth model — namespace
+isolation, seccomp-BPF filtering, capability-scoped permissions,
+allocator hardening, CFI enforcement, cryptographic IPC integrity,
+AI behavioural monitoring — is the long-term goal. Today three of
+those seven layers operate (namespaces, capability gating on
+allocations, basic allocator hardening). The rest are scoped in
+[docs/PUBLICATION_STRATEGY.md](PUBLICATION_STRATEGY.md).
 
 **Audiences**
 
