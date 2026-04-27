@@ -68,6 +68,33 @@ target_link_libraries(test_ipc_sprint3
 add_test(NAME Sprint3IpcWaitNotifyTest COMMAND test_ipc_sprint3)
 message(STATUS "  [M-03] test_ipc_sprint3 configured")
 
+# Sprint 5 capability-gate tests (Paper 1 hot-path correctness)
+add_executable(test_ipc_sprint5_cap_gate
+    test_sprint5_cap_gate.cpp
+)
+target_link_libraries(test_ipc_sprint5_cap_gate
+    PRIVATE
+        astra_ipc
+        astra_core
+        astra_asm_core
+        pthread
+)
+add_test(NAME Sprint5IpcCapGateTest COMMAND test_ipc_sprint5_cap_gate)
+message(STATUS "  [M-03] test_ipc_sprint5_cap_gate configured")
+
+# Sprint 5 microbench: gate-on vs gate-off latency (Paper 1 headline figure)
+add_executable(bench_ipc_with_gate
+    bench_ipc_with_gate.cpp
+)
+target_link_libraries(bench_ipc_with_gate
+    PRIVATE
+        astra_ipc
+        astra_core
+        astra_asm_core
+        pthread
+)
+message(STATUS "  [M-03] bench_ipc_with_gate configured")
+
 # Live demo: shows IPC working interactively in the terminal
 add_executable(demo_ipc_live
     demo_ipc_live.cpp
