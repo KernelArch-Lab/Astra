@@ -91,10 +91,39 @@ OPT=(bench_baseline_aeron
 
 for b in "${OPT[@]}"; do run_one "$b" || true; done
 
-# --- 3. Summary -------------------------------------------------------------
+# --- 3. Sprint 8 extended metrics (separate CSVs, distinct schemas) ---------
+ART_DIR="$(dirname "$OUT_FILE")"
+
+run_to_file () {
+    local name="$1"
+    local out="$2"
+    local bin="$BUILD_DIR/tests/bench/$name"
+    if [[ ! -x "$bin" ]]; then
+        echo "  SKIP $name (binary missing)"; return
+    fi
+    echo "  RUN  $name → $out"
+    $PERF "$bin" > "$out" 2>/dev/null || {
+        echo "  FAIL $name" >&2; return 1
+    }
+}
+
+echo "==> Running Sprint 8 metrics"
+run_to_file bench_throughput         "$ART_DIR/paper1_throughput.csv"        || true
+run_to_file bench_throughput_mpsc    "$ART_DIR/paper1_throughput_mpsc.csv"   || true
+run_to_file bench_revocation_latency "$ART_DIR/paper1_revocation.csv"        || true
+run_to_file bench_perfcounters       "$ART_DIR/paper1_perfcounters.csv"      || true
+run_to_file bench_pool_scaling       "$ART_DIR/paper1_pool_scaling.csv"      || true
+
+# --- 4. Summary -------------------------------------------------------------
 echo
 echo "==> Sweep complete"
-echo "    Wrote $(wc -l < "$OUT_FILE") rows to $OUT_FILE"
+echo "    Figure 1 (latency):    $OUT_FILE  ($(wc -l < "$OUT_FILE") rows)"
+echo "    Throughput:            $ART_DIR/paper1_throughput.csv"
+echo "    MPSC scaling:          $ART_DIR/paper1_throughput_mpsc.csv"
+echo "    Revocation latency:    $ART_DIR/paper1_revocation.csv"
+echo "    Perf counters:         $ART_DIR/paper1_perfcounters.csv"
+echo "    Pool-size scaling:     $ART_DIR/paper1_pool_scaling.csv"
 echo
 echo "    Figure 1 plot:    python3 scripts/plot_paper1_figure.py $OUT_FILE"
+echo "    Figure 2 plot:    python3 scripts/plot_paper1_figure_2.py $ART_DIR/paper1_pool_scaling.csv"
 echo "    Quick read:       column -t -s, $OUT_FILE | sort -k1,1 -k2,2n"
