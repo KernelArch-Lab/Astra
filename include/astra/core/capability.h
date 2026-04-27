@@ -282,7 +282,27 @@ private:
     void acquireSpinlock() const noexcept;
     void releaseSpinlock() const noexcept;
     Result<U32> findFreeSlot() const;
-    void generateTokenId(std::array<U64, 2>& aArrOut);
+
+    // Mint a fresh token UID with the given pool slot embedded in the
+    // high 32 bits of m_arrUId[0]. The remaining 96 bits are filled
+    // from RDRAND (M-21 hwrng). This packing is what makes validate()
+    // O(1): the slot index is recoverable from the token without a
+    // pool scan, and 96 bits of randomness keep the UID unforgeable
+    // (2^96 search space).
+    void generateTokenId(U32 aUSlot, std::array<U64, 2>& aArrOut);
+
+    // Static helpers for the slot-index packing. These are the inverse
+    // of each other and are the central trick of the Sprint 4 fast path.
+    // See src/core/capability.cpp for the rationale (line ~280).
+    static constexpr U64 packSlotIntoUid(U32 aUSlot) noexcept
+    {
+        return static_cast<U64>(aUSlot) << 32;
+    }
+    static constexpr U32 extractSlotFromUid(U64 aUUidHi) noexcept
+    {
+        return static_cast<U32>(aUUidHi >> 32);
+    }
+
     U32 revokeDescendants(const std::array<U64, 2>& aArrParentId);
 };
 
