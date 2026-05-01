@@ -9,20 +9,31 @@
 ## TL;DR
 
 ```bash
-# Required tools: cmake ≥ 3.28, gcc/clang with C++23, NASM, liburing-devel
-sudo dnf install -y cmake gcc-c++ nasm liburing-devel python3-pandas python3-matplotlib
+# 0. Verify host has every tool the paper needs:
+./scripts/check_paper1_env.sh
 
-# Build + run the full sweep + render the figure + emit the LaTeX table:
+# 1. Required tools — install on Fedora 39+:
+sudo dnf install -y cmake gcc-c++ nasm liburing-devel cbmc \
+                     texlive-scheme-medium \
+                     python3-pandas python3-matplotlib python3-numpy
+
+# 2. Run the full sweep (latency + throughput + revoke + perf counters):
 ./scripts/run_paper1_sweep.sh
-python3 scripts/plot_paper1_figure.py artefact/paper1_figure_1.csv
+
+# 3. Build the paper PDF — picks up the fresh CSVs, regenerates every
+#    figure + numbers.tex + table_1 + table_perf, runs pdflatex/bibtex:
+cd papers/paper1 && ./build.sh --refresh
 
 # Outputs:
-#   artefact/paper1_figure_1.csv    (raw measurements)
-#   artefact/paper1_figure_1.pdf    (Figure 1 in the paper)
-#   artefact/paper1_table_1.tex     (Table 1 in the paper)
+#   artefact/paper1_figure_1.csv         RTT measurements (Figure 1)
+#   artefact/paper1_pool_scaling.csv     validate vs pool size (Figure 2)
+#   artefact/paper1_throughput_mpsc.csv  MPSC scaling (Figure 3)
+#   artefact/paper1_revocation.csv       revoke window CDF (Figure 4)
+#   artefact/paper1_perfcounters.csv     cycles / cache misses (Table perf)
+#   papers/paper1/main.pdf               the compiled paper
 ```
 
-Total wall time on a Xeon Gold 6248: ~12 minutes.
+Total wall time on a Xeon Gold 6248: ~14 minutes.
 
 ---
 

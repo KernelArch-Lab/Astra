@@ -29,17 +29,33 @@ cd "$(dirname "$0")"
 if [[ $REFRESH -eq 1 ]]; then
     echo "==> Refreshing figures + numbers.tex"
     (cd ../.. && ./scripts/run_paper1_sweep.sh)
+
+    mkdir -p figures numbers
+
     python3 ../../scripts/plot_paper1_figure.py   ../../artefact/paper1_figure_1.csv \
         --pdf figures/paper1_figure_1.pdf \
         --tex numbers/table_1.tex
     python3 ../../scripts/plot_paper1_figure_2.py ../../artefact/paper1_pool_scaling.csv \
         --pdf figures/paper1_figure_2.pdf
-    # numbers.tex generation lives in scripts/gen_numbers_tex.py (TODO if more refinement needed)
+    python3 ../../scripts/plot_paper1_figure_3_mpsc.py ../../artefact/paper1_throughput_mpsc.csv \
+        --pdf figures/paper1_figure_3_mpsc.pdf || true
+    python3 ../../scripts/plot_paper1_figure_4_revoke.py ../../artefact/paper1_revocation.csv \
+        --pdf figures/paper1_figure_4_revoke.pdf || true
+
     python3 ../../scripts/gen_numbers_tex.py \
         ../../artefact/paper1_figure_1.csv \
         ../../artefact/paper1_pool_scaling.csv \
         ../../artefact/paper1_revocation.csv \
         > numbers/numbers.tex || true
+
+    python3 ../../scripts/gen_table_perf.py \
+        ../../artefact/paper1_perfcounters.csv \
+        > numbers/table_perf.tex || true
+
+    # Build the gate_path TikZ standalone if not already a PDF.
+    if [[ ! -f figures/gate_path.pdf || figures/gate_path.tex -nt figures/gate_path.pdf ]]; then
+        (cd figures && pdflatex -interaction=nonstopmode -halt-on-error gate_path.tex || true)
+    fi
 fi
 
 # Apply mode override.
