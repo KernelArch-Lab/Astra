@@ -36,6 +36,8 @@ compile_commands.json
 *.cmake
 !cmake/**/*.cmake
 !CMakeLists.txt
+!formal/**/Makefile
+!papers/**/Makefile
 
 # IDE and editor files
 .vscode/

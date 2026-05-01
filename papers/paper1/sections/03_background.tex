@@ -1,0 +1,98 @@
+\section{Background and related work}
+\label{sec:bg}
+
+We summarise prior work along the two axes that frame the empty cell
+\sysname enters: \textbf{capability mediation} and \textbf{userspace
+IPC}. Extended discussion is deferred to \Cref{sec:rw}.
+
+\subsection{Capability systems}
+\label{sec:bg:cap}
+
+The capability discipline goes back to Dennis~\&\ Van~Horn~\cite{dennis1966}
+and was made cryptographically respectable by Redell~\cite{redell74},
+whose epoch-versioned credential pattern is the algorithmic ancestor
+of every revocable-capability system since. KeyKOS~\cite{keykos} and
+EROS~\cite{shapiro1999eros} demonstrated that the pattern works at OS
+scale; CapROS~\cite{capros} carried it forward.
+seL4~\cite{klein2009sel4} closed the loop with full functional
+correctness verification of a capability microkernel.
+
+In modern systems, two recent works are the immediate peer set.
+\textbf{Cornucopia\,Reloaded}~\cite{cornucopia-reloaded} (ASPLOS '24)
+generalises the epoch-revocation pattern to a CHERI hardware
+substrate and demonstrates O(1) bulk revocation; \sysname's revocation
+algorithm \emph{is} Cornucopia\,Reloaded's, ported to software and
+held under the Linux process boundary. We cite this prominently: the
+algorithmic novelty is theirs; our contribution is the realisation
+without CHERI.
+\textbf{HongMeng}~\cite{hongmeng} (OSDI '24) is the closest competitor on
+the (Linux-compatible, capability-based, IPC-fastpath) triple. It is
+a kernel below Linux, not a runtime above it, and its authors describe
+retreating from "pure" capability chains to "address tokens" because
+chain-revocation cost was hurting common-case performance. \sysname
+sits on the other side of the kernel boundary; \Cref{sec:disc:hongmeng}
+discusses the consequences.
+
+\textbf{CAP-VMs}~\cite{capvms} (OSDI '22) is the closest peer on
+capability + IPC, but requires CHERI/Morello hardware. \sysname's
+positioning is "the same conceptual layer, on stock Linux".
+
+\subsection{Userspace IPC primitives}
+\label{sec:bg:ipc}
+
+\textbf{Aeron}~\cite{aeron-real-logic} ships a
+single-producer-single-consumer IPC over an mmap'd ring buffer with
+~250\,ns published RTT for 100-byte payloads on commodity Xeon. It is
+the latency floor we measure against. ByteDance's
+shmipc~\cite{bytedance-shmipc} is production-deployed and
+architecturally similar.
+
+\textbf{io\_uring}~\cite{iouring} is the prototype of "mmap'd SQ/CQ
+ring buffer plus futex-style notification" in the Linux kernel
+itself; \sysname's RingBuffer reuses the design template at a higher
+layer (the kernel doesn't see our messages; we don't pay
+\texttt{enter}-time syscall cost).
+
+\textbf{eRPC}~\cite{erpc} (NSDI '19) is the published peer-reviewed
+RPC number with the lowest latency we are aware of (~2.3\,$\mu$s for a
+single-hop request/response). It is an RPC layer rather than a raw
+transport; we cite it for the network-RPC reference point but do not
+fight on raw IPC RTT.
+
+\textbf{LITESHIELD}~\cite{liteshield} (USENIX ATC '25) is the
+architectural neighbour: a userspace $\mu$kernel-style runtime on
+Linux with shared-memory IPC and a ~22-syscall host interface. It has
+no capability layer. \sysname's framing is "the capability layer over
+that architectural shape"; we cite LITESHIELD prominently because (a)
+the architectural overlap is real, and (b) ATC '25 is the venue we
+are submitting to.
+
+\subsection{The empty cell}
+
+\Cref{tab:landscape} summarises the cells. The intersection of
+\textit{(Linux compatible)} $\cap$ \textit{(no CHERI)} $\cap$
+\textit{(capability-mediated IPC)} $\cap$ \textit{(measured against
+Aeron-class numbers)} is empty in the current literature. \sysname
+fills it.
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{lccccc}
+\toprule
+System            & Linux & no CHERI & Caps & IPC fastpath & Userspace \\
+\midrule
+seL4              & no  & yes & yes & yes & no  \\
+HongMeng          & yes & yes & weak & yes & no  \\
+gVisor            & yes & yes & no  & no  & yes \\
+Firecracker       & yes & yes & no  & no  & yes \\
+CAP-VMs           & yes & no  & yes & yes & yes \\
+LITESHIELD        & yes & yes & no  & yes & yes \\
+Aeron             & yes & yes & no  & yes & yes \\
+io\_uring         & yes & yes & no  & yes & no  \\[2pt]
+\textbf{\sysname} & \textbf{yes} & \textbf{yes} & \textbf{yes} & \textbf{yes} & \textbf{yes} \\
+\bottomrule
+\end{tabular}
+\caption{The cell \sysname enters. "weak" caps in HongMeng marks the
+authors' own retreat to address tokens.}
+\label{tab:landscape}
+\end{table}

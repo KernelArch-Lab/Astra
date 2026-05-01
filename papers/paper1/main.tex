@@ -1,0 +1,69 @@
+% =============================================================================
+% Paper 1 — Capability-Gated Zero-Copy IPC: Sub-Microsecond Validated Message
+%           Delivery on Stock Linux
+%
+% Target: USENIX ATC 2027 (Jan 2027 deadline)
+% Format: usenix-2020-09 style (10pt, two-column)
+%
+% Build: ./build.sh
+% =============================================================================
+
+\documentclass[letterpaper,twocolumn,10pt]{article}
+
+\usepackage{usenix-2020-09}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{listings}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+\input{macros}
+
+% Anonymize for double-blind submission. Set to false for camera-ready.
+\newif\ifanon
+\anontrue
+
+\title{Capability-Gated Zero-Copy IPC:\\
+       Sub-Microsecond Validated Message Delivery on Stock Linux}
+
+\ifanon
+  \author{Anonymous Author(s)}
+\else
+  \author{
+    {\rm Author One}\\KernelArch Labs
+    \and
+    {\rm Author Two}\\KernelArch Labs
+  }
+\fi
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\input{sections/00_abstract}
+\end{abstract}
+
+\input{sections/01_intro}
+\input{sections/02_threat_model}
+\input{sections/03_background}
+\input{sections/04_design}
+\input{sections/05_implementation}
+\input{sections/06_evaluation}
+\input{sections/07_discussion}
+\input{sections/08_related_work}
+\input{sections/09_conclusion}
+
+\bibliographystyle{plain}
+\bibliography{bibliography}
+
+\end{document}

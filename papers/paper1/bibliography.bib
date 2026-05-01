@@ -1,0 +1,261 @@
+% =============================================================================
+% Paper 1 — bibliography. Drawn from the 2026-04-27 prior-art survey.
+% =============================================================================
+
+@article{dennis1966,
+  author  = {Jack B. Dennis and Earl C. {Van Horn}},
+  title   = {Programming semantics for multiprogrammed computations},
+  journal = {Communications of the ACM},
+  volume  = {9},
+  number  = {3},
+  pages   = {143--155},
+  year    = {1966}
+}
+
+@phdthesis{redell74,
+  author = {David D. Redell},
+  title  = {Naming and protection in extendible operating systems},
+  school = {Massachusetts Institute of Technology},
+  year   = {1974}
+}
+
+@misc{keykos,
+  author = {Norman Hardy},
+  title  = {{KeyKOS} architecture},
+  year   = {1985},
+  note   = {Operating Systems Review, vol.~19, no.~4}
+}
+
+@inproceedings{shapiro1999eros,
+  author    = {Jonathan S. Shapiro and Jonathan M. Smith and David J. Farber},
+  title     = {{EROS}: A fast capability system},
+  booktitle = {Proc. SOSP},
+  year      = {1999}
+}
+
+@misc{capros,
+  author = {Jonathan S. Shapiro and others},
+  title  = {{CapROS}: The capability-based reliable operating system},
+  year   = {2007},
+  note   = {\url{https://capros.org}}
+}
+
+@inproceedings{klein2009sel4,
+  author    = {Gerwin Klein and Kevin Elphinstone and Gernot Heiser and others},
+  title     = {{seL4}: Formal verification of an {OS} kernel},
+  booktitle = {Proc. SOSP},
+  year      = {2009}
+}
+
+@inproceedings{cheri-asplos15,
+  author    = {Robert N. M. Watson and Jonathan Woodruff and Peter G. Neumann
+               and Simon W. Moore and others},
+  title     = {{CHERI}: A hybrid capability-system architecture for scalable
+               software compartmentalization},
+  booktitle = {Proc. IEEE S\&P},
+  year      = {2015}
+}
+
+@misc{cheri-tcg22,
+  author = {Robert N. M. Watson and others},
+  title  = {Capability hardware enhanced {RISC} instructions: {CHERI}
+            instruction-set architecture (version 9)},
+  note   = {Technical Report UCAM-CL-TR-987, University of Cambridge},
+  year   = {2023}
+}
+
+@inproceedings{capvms,
+  author    = {Vasily A. Sartakov and Lluís Vilanova and Peter Pietzuch},
+  title     = {{CAP-VMs}: Capability-based isolation and sharing for
+               microservices},
+  booktitle = {Proc. OSDI},
+  year      = {2022}
+}
+
+@inproceedings{cornucopia-reloaded,
+  author    = {Nathaniel Wesley Filardo and others},
+  title     = {{Cornucopia Reloaded}: Load barriers for {CHERI} heap
+               temporal safety},
+  booktitle = {Proc. ASPLOS},
+  year      = {2024}
+}
+
+@inproceedings{picasso,
+  author    = {Authors of {PICASSO}},
+  title     = {{PICASSO}: Hardware provenance tracking for bulk pointer
+               invalidation},
+  booktitle = {Proc. IEEE S\&P},
+  year      = {2024}
+}
+
+@inproceedings{hongmeng,
+  author    = {{HongMeng team, Huawei}},
+  title     = {{HongMeng}: A high-performance capability microkernel for
+               Linux compatibility},
+  booktitle = {Proc. OSDI},
+  year      = {2024}
+}
+
+@inproceedings{liteshield,
+  author    = {{LITESHIELD authors}},
+  title     = {{LITESHIELD}: A userspace $\mu$kernel-style runtime on Linux},
+  booktitle = {Proc. USENIX ATC},
+  year      = {2025}
+}
+
+@inproceedings{certikos,
+  author    = {Ronghui Gu and Zhong Shao and Hao Chen and Xiongnan (Newman) Wu
+               and Jieung Kim and Vilhelm Sjöberg and David Costanzo},
+  title     = {{CertiKOS}: An extensible architecture for building certified
+               concurrent {OS} kernels},
+  booktitle = {Proc. OSDI},
+  year      = {2016}
+}
+
+@misc{aeron-real-logic,
+  author = {{Real Logic}},
+  title  = {Aeron: efficient, reliable, low-latency messaging},
+  year   = {2024},
+  note   = {\url{https://github.com/real-logic/aeron}}
+}
+
+@misc{bytedance-shmipc,
+  author = {ByteDance},
+  title  = {shmipc: high-performance inter-process communication library
+            using shared memory},
+  year   = {2023},
+  note   = {\url{https://github.com/cloudwego/shmipc-go}}
+}
+
+@misc{iouring,
+  author = {Jens Axboe},
+  title  = {Efficient {I}{O} with {io\_uring}},
+  year   = {2019},
+  note   = {Linux kernel documentation, kernel 5.1+}
+}
+
+@inproceedings{erpc,
+  author    = {Anuj Kalia and Michael Kaminsky and David G. Andersen},
+  title     = {Datacenter {RPC}s can be general and fast},
+  booktitle = {Proc. NSDI},
+  year      = {2019}
+}
+
+@misc{capnproto-rpc,
+  author = {Kenton Varda},
+  title  = {Cap'n Proto {RPC} protocol},
+  year   = {2014},
+  note   = {\url{https://capnproto.org/rpc.html}}
+}
+
+@misc{gvisor,
+  author = {Google},
+  title  = {{gVisor}: Application kernel for containers},
+  year   = {2018},
+  note   = {\url{https://gvisor.dev}}
+}
+
+@misc{firecracker,
+  author = {Amazon Web Services},
+  title  = {Firecracker microVM},
+  year   = {2018},
+  note   = {\url{https://firecracker-microvm.github.io/}}
+}
+
+@inproceedings{tock,
+  author    = {Amit Levy and Bradford Campbell and Branden Ghena and others},
+  title     = {Multiprogramming a 64\,kB computer safely and efficiently},
+  booktitle = {Proc. SOSP},
+  year      = {2017}
+}
+
+@inproceedings{theseus,
+  author    = {Kevin Boos and Namitha Liyanage and Ramla Ijaz and Lin Zhong},
+  title     = {Theseus: An experiment in operating system structure and state
+               management},
+  booktitle = {Proc. OSDI},
+  year      = {2020}
+}
+
+@misc{cbmc,
+  author = {Daniel Kroening and Michael Tautschnig},
+  title  = {{CBMC}: A bounded model checker for {ANSI}-{C} programs},
+  year   = {2014},
+  note   = {Tools and Algorithms for the Construction and Analysis of Systems}
+}
+
+@misc{spin,
+  author = {Gerard J. Holzmann},
+  title  = {The {SPIN} model checker},
+  year   = {2003},
+  note   = {Addison-Wesley}
+}
+
+@misc{tdx2024,
+  author = {Intel Corporation},
+  title  = {Intel Trust Domain Extensions ({TDX}) overview},
+  year   = {2024}
+}
+
+@misc{sevsnp,
+  author = {AMD},
+  title  = {{AMD Secure Encrypted Virtualization} -- {SNP}},
+  year   = {2020}
+}
+
+@misc{arm-cca,
+  author = {Arm Limited},
+  title  = {{Arm Confidential Compute Architecture (CCA)}},
+  year   = {2024}
+}
+
+@misc{anthropic-cu,
+  author = {Anthropic},
+  title  = {Claude Computer Use},
+  year   = {2024},
+  note   = {\url{https://www.anthropic.com/news/3-5-models-and-computer-use}}
+}
+
+@misc{openai-agents,
+  author = {OpenAI},
+  title  = {OpenAI Agents API},
+  year   = {2024}
+}
+
+@misc{devin,
+  author = {Cognition AI},
+  title  = {Devin: An autonomous {AI} software engineer},
+  year   = {2024}
+}
+
+@misc{nist-ai-600-1,
+  author = {NIST},
+  title  = {{NIST AI 600-1}: Artificial intelligence risk management
+            framework: Generative {AI} profile},
+  year   = {2024}
+}
+
+@misc{euaiact15,
+  author = {European Parliament},
+  title  = {Regulation (EU) 2024/1689 (the AI Act), Article 15},
+  year   = {2024}
+}
+
+@misc{astra-confcompute,
+  author = {{KernelArch Labs}},
+  title  = {Astra Runtime: Confidential-compute architecture overview},
+  year   = {2026},
+  note   = {Companion technical report}
+}
+
+@misc{scaletrust,
+  author = {Authors of ScaleTrust},
+  title  = {ScaleTrust: TDX-bound credentials for confidential workloads},
+  year   = {2024}
+}
+
+@misc{conclave,
+  author = {R3},
+  title  = {Conclave: Confidential computing platform},
+  year   = {2022}
+}

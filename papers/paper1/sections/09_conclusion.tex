@@ -1,0 +1,24 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented \sysnamefull, a userspace runtime that mediates every
+zero-copy IPC message through a 128-bit capability token on stock
+Linux. The headline contribution is a slot-indexed validate path
+that costs \gateOverheadP99\,ns per message at p99 while preserving
+$2^{96}$-bit forgery resistance and supporting Cornucopia\,Reloaded-class
+$O(1)$ cascading revocation in software at the application layer.
+\sysname's gated round-trip latency lands within \aeronGapPercent\%
+of Aeron's published 250\,ns floor across payload sizes from 64\,B
+to 16\,KiB; revocation takes effect within \revokeP99 of the
+\texttt{revoke()} call; and the gate scales linearly under MPSC
+contention with up to 16 producers.
+
+The work is one entry in a larger effort to make capability discipline
+a default for userspace runtimes that mediate untrusted code on
+commodity hardware, including LLM-agent tool execution
+(M-22 AgentGuard) and confidential-compute attestation
+(M-23 ConfCompute). Both are in preparation as follow-up papers.
+
+The artefact is open source and a single command,
+\texttt{scripts/run\_paper1\_sweep.sh}, reproduces every figure on a
+fresh Fedora 39+ machine with no internet access required.

@@ -1,0 +1,33 @@
+Userspace runtimes that mediate untrusted code on commodity Linux face a
+recurring tension: they want \textit{capability-grade} access control on every
+inter-component message, but the IPC mechanisms with the strongest security
+guarantees (seL4, CHERI-based systems) require kernel modifications or
+specialised hardware that are not deployable to existing fleets, while the
+fastest userspace IPC primitives (Aeron, io_uring, eRPC) provide no
+capability layer at all.
+
+We present \sysnamefull, the first userspace runtime to enforce
+capability-token-mediated access control on a zero-copy memfd IPC fastpath
+on stock Linux, without kernel modification, special hardware, or
+hypervisor support. \sysname binds a 128-bit unforgeable token to each
+endpoint of every IPC channel and validates the token on \emph{every}
+message at producer and consumer.
+
+The headline contribution is a \emph{slot-indexed validate path} that
+collapses what would naturally be an $O(n)$ pool scan into a single shift,
+one cache load, and one constant-time compare, while preserving a
+$2^{96}$-bit forgery space. We measure a per-message gate cost of
+\gateOverheadP99 ns at p99 across payload sizes 64 B--16 KiB, keeping
+\sysname's gated round-trip latency within \aeronGapPercent\% of Aeron's
+published 250\,ns floor, while delivering Cornucopia\,Reloaded-class
+\textit{O(1)} cascading revocation in software at the application layer.
+We additionally show that revocation takes effect within \revokeP99 of
+the \texttt{revoke()} call (end-to-end, including drain), survives MPSC
+contention with up to 16 producers, and is verified against a hand-rolled
+property-based oracle and a CBMC bounded-model proof of capability
+monotonicity.
+
+Our evaluation covers a peer-set of pipe(2), socketpair, io_uring,
+Aeron, and eRPC, all measured in the same TSC domain on a single
+machine. Source, baseline harnesses, and a one-command artefact-evaluation
+sweep are publicly available.
