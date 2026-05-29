@@ -34,3 +34,17 @@ target_link_libraries(test_sprint2
 
 add_test(NAME Sprint2MountTest COMMAND test_sprint2)
 message(STATUS "  [M-02] test_sprint2 configured")
+
+# ── Sprint 3: Seccomp filter test ────────────────────────────────────────────
+add_executable(test_sprint3
+    test_sprint3_seccomp.cpp
+)
+target_link_libraries(test_sprint3
+    PRIVATE
+        astra_isolation
+        astra_core
+        astra_asm_core
+        pthread
+)
+add_test(NAME Sprint3SeccompTest COMMAND test_sprint3)
+message(STATUS "  [M-02] test_sprint3 configured")
