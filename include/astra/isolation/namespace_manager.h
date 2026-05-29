@@ -35,6 +35,7 @@
 #include <astra/common/types.h>
 #include <astra/common/result.h>
 #include <astra/isolation/profile_engine.h>
+#include "astra/isolation/seccomp_filter.h"
 
 #include <atomic>
 #include <string>
@@ -222,6 +223,11 @@ private:
     // Set in createMountNamespace(), used by buildSandboxFilesystem()
     // and cleanupSandboxRoot().
     std::string m_szSandboxRoot;
+
+    // SeccompFilter instance for this sandbox. [Sprint 3]
+    // Applied as the final step of setup(), after all namespaces
+    // and filesystem isolation are in place.
+    SeccompFilter m_seccompFilter;
 
     // ---------------------------------------------------------------
     // Sprint 1 private steps
