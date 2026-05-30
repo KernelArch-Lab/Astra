@@ -235,6 +235,8 @@ if(ASTRA_ENABLE_TESTS)
     message(STATUS "Test suite enabled (IPC Sprint 1)")
     add_subdirectory(tests/ebpf)
     message(STATUS "Test suite enabled (M-09 eBPF tests)")
+    add_subdirectory(tests/bench)
+    message(STATUS "Test suite enabled (Paper 1 baseline harnesses)")
 endif()
 
 # --------------------------------------------------------------------------
