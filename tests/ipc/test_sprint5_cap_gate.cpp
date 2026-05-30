@@ -103,13 +103,13 @@ static void fnTestUnboundGate()
 
     auto lW = lRing.writeGated(lUnbound, "x", 1);
     EXPECT(!lW.has_value() &&
-           lW.error().code == ErrorCode::PERMISSION_DENIED,
+           lW.error().code() == ErrorCode::PERMISSION_DENIED,
            "T2: unbound writeGated → PERMISSION_DENIED");
 
     char lBuf[8] = {0};
     auto lR = lRing.readGated(lUnbound, lBuf, sizeof(lBuf));
     EXPECT(!lR.has_value() &&
-           lR.error().code == ErrorCode::PERMISSION_DENIED,
+           lR.error().code() == ErrorCode::PERMISSION_DENIED,
            "T2: unbound readGated → PERMISSION_DENIED");
 
     std::printf("  PASS T2 — unbound gate rejected\n");
@@ -134,7 +134,7 @@ static void fnTestMissingSendPermission()
     const U32 lUFreeAfter  = lRing.freeBytes();
 
     EXPECT(!lW.has_value() &&
-           lW.error().code == ErrorCode::PERMISSION_DENIED,
+           lW.error().code() == ErrorCode::PERMISSION_DENIED,
            "T3: token without IPC_SEND rejected");
 
     // PAPER 1 INVARIANT: denied request leaves the ring untouched.
@@ -165,7 +165,7 @@ static void fnTestMissingRecvPermission()
     char lBuf[8] = {0};
     auto lR = lRing.readGated(lWeakGate, lBuf, sizeof(lBuf));
     EXPECT(!lR.has_value() &&
-           lR.error().code == ErrorCode::PERMISSION_DENIED,
+           lR.error().code() == ErrorCode::PERMISSION_DENIED,
            "T4: read with IPC_SEND-only token rejected");
 
     std::printf("  PASS T4 — missing IPC_RECV rejected\n");
@@ -196,7 +196,7 @@ static void fnTestRevokeMidFlight()
 
     auto lW2 = lRing.writeGated(lGate, "after", 5);
     EXPECT(!lW2.has_value() &&
-           lW2.error().code == ErrorCode::PERMISSION_DENIED,
+           lW2.error().code() == ErrorCode::PERMISSION_DENIED,
            "T5: post-revoke write rejected");
 
     std::printf("  PASS T5 — revoke takes effect on next message\n");
@@ -225,7 +225,7 @@ static void fnTestCascadingRevoke()
 
     auto lW2 = lRing.writeGated(lChildGate, "child-msg", 9);
     EXPECT(!lW2.has_value() &&
-           lW2.error().code == ErrorCode::PERMISSION_DENIED,
+           lW2.error().code() == ErrorCode::PERMISSION_DENIED,
            "T6: child gate dies when parent revoked");
 
     std::printf("  PASS T6 — cascading revoke kills child gate\n");
