@@ -440,6 +440,146 @@ Result<U32> RingBuffer::peekNextSize() const noexcept
     }
 }
 
+// ===========================================================================
+// Sprint 5 - Capability-gated overloads (Paper 1 hot path)
+// ===========================================================================
+//
+// Track B Sprint 5 of the Paper 1 (USENIX ATC 2027) prep work. The gated
+// overloads call CapabilityManager::validate() before touching the ring.
+// Sprint 4 made that validate() O(1) (slot-indexed lookup, single
+// asm_ct_compare); without that, this gate would be unusable on the IPC
+// fastpath.
+//
+// Why these are separate methods and not a default-on transformation of
+// write()/read():
+//   - Existing M-03 callers (test_sprint1*, test_sprint2*, test_sprint3*,
+//     M-05 replay reconstruction when it lands) construct RingBuffer
+//     directly from raw memfd pointers and have no CapabilityManager.
+//     Forcing capability validation into the bottom-half API would break
+//     those flows for no value-add.
+//   - The Paper 1 head-to-head measurement requires the gate-OFF arm:
+//     bench_ipc_with_gate runs raw write/read and gated write/read in
+//     the same TSC domain to isolate the per-message gate cost.
+//
+// Why we hoist the validate() out of the claim path:
+//   - validate() returns false for any of: bad slot index, revoked token,
+//     missing permission, future epoch, null token. None of these are
+//     recoverable mid-message. We fail fast, return PERMISSION_DENIED,
+//     and never touch m_uWriteClaimIndex — so a denied write contributes
+//     zero bytes of contention to honest producers.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+inline ::astra::Status fnGateError(const char* aSzReason) noexcept
+{
+    return std::unexpected(makeError(
+        ErrorCode::PERMISSION_DENIED,
+        ErrorCategory::IPC,
+        aSzReason
+    ));
+}
+} // namespace
+
+Result<void> RingBuffer::writeGated(
+    const CapabilityGate& aGate,
+    const void*           aData,
+    U32                   aPayloadLen) noexcept
+{
+    if (!aGate.isBound())
+    {
+        return fnGateError("writeGated: gate not bound to CapabilityManager + token");
+    }
+    if (!aGate.m_pManager->validate(aGate.m_token,
+                                    ::astra::Permission::IPC_SEND))
+    {
+        return fnGateError("writeGated: capability validation failed (revoked or missing IPC_SEND)");
+    }
+    return write(aData, aPayloadLen);
+}
+
+Result<U32> RingBuffer::readGated(
+    const CapabilityGate& aGate,
+    void*                 aBuf,
+    U32                   aBufLen) noexcept
+{
+    if (!aGate.isBound())
+    {
+        return std::unexpected(makeError(
+            ErrorCode::PERMISSION_DENIED,
+            ErrorCategory::IPC,
+            "readGated: gate not bound to CapabilityManager + token"
+        ));
+    }
+    if (!aGate.m_pManager->validate(aGate.m_token,
+                                    ::astra::Permission::IPC_RECV))
+    {
+        return std::unexpected(makeError(
+            ErrorCode::PERMISSION_DENIED,
+            ErrorCategory::IPC,
+            "readGated: capability validation failed (revoked or missing IPC_RECV)"
+        ));
+    }
+    return read(aBuf, aBufLen);
+}
+
+Result<void> RingBuffer::writeNotifyGated(
+    const CapabilityGate& aGate,
+    const void*           aData,
+    U32                   aPayloadLen) noexcept
+{
+    if (!aGate.isBound())
+    {
+        return fnGateError("writeNotifyGated: gate not bound");
+    }
+    if (!aGate.m_pManager->validate(aGate.m_token,
+                                    ::astra::Permission::IPC_SEND))
+    {
+        return fnGateError("writeNotifyGated: capability validation failed");
+    }
+    return writeNotify(aData, aPayloadLen);
+}
+
+Result<U32> RingBuffer::readWaitGated(
+    const CapabilityGate& aGate,
+    void*                 aBuf,
+    U32                   aBufLen) noexcept
+{
+    if (!aGate.isBound())
+    {
+        return std::unexpected(makeError(
+            ErrorCode::PERMISSION_DENIED,
+            ErrorCategory::IPC,
+            "readWaitGated: gate not bound"
+        ));
+    }
+    // For the blocking variant we re-validate AFTER each wake-up too —
+    // a token can be revoked while a reader is parked on the futex; we
+    // don't want a stale wake to deliver a message past the revoke epoch.
+    while (true)
+    {
+        if (!aGate.m_pManager->validate(aGate.m_token,
+                                        ::astra::Permission::IPC_RECV))
+        {
+            return std::unexpected(makeError(
+                ErrorCode::PERMISSION_DENIED,
+                ErrorCategory::IPC,
+                "readWaitGated: capability revoked while waiting"
+            ));
+        }
+        const U64 lUCurWrite = m_pControl->m_write.m_uWriteIndex
+                                   .load(std::memory_order_acquire);
+        const U64 lUCurRead  = m_pControl->m_read.m_uReadIndex
+                                   .load(std::memory_order_relaxed);
+        if (lUCurWrite - lUCurRead >= static_cast<U64>(sizeof(MessageHeader)))
+        {
+            return read(aBuf, aBufLen);
+        }
+        m_pControl->m_write.m_uWriteIndex.wait(lUCurWrite,
+                                               std::memory_order_acquire);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Sprint 3 - writeNotify
 // ---------------------------------------------------------------------------
