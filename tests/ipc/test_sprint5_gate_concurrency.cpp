@@ -98,13 +98,15 @@ int main()
     for (int i = 0; i < kProducers; ++i)
     {
         producers.emplace_back([&, i]() {
+            // sendGate is std::vector; subscripts want size_t.
+            const auto ui = static_cast<std::size_t>(i);
             uint32_t seq = 0;
             while (!stop.load(std::memory_order_acquire))
             {
                 Tagged m{};
                 m.producerId = static_cast<uint32_t>(i);
                 m.seq        = seq++;
-                auto w = ring.writeGated(sendGate[i], &m, sizeof(m));
+                auto w = ring.writeGated(sendGate[ui], &m, sizeof(m));
                 if (!w.has_value() &&
                     w.error().code() == ErrorCode::PERMISSION_DENIED)
                 {
@@ -162,11 +164,12 @@ int main()
             static_cast<unsigned long long>(firstDenied));
     }
 
-    // Other producers must have made progress.
+    // Other producers must have made progress. maxObserved is a
+    // std::vector — explicit size_t cast on the subscript.
     for (int i = 0; i < kProducers; ++i)
     {
         if (i == 3) continue;
-        if (maxObserved[i].load() == 0)
+        if (maxObserved[static_cast<std::size_t>(i)].load() == 0)
         {
             ++g_failures;
             std::fprintf(stderr,

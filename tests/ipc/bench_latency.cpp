@@ -116,9 +116,12 @@ static double fnCalibrateTscPerNs()
 static void fnPinThreadToCore(int iCore)
 {
 #if defined(__linux__)
+    if (iCore < 0) return;
     cpu_set_t lCpuSet;
     CPU_ZERO(&lCpuSet);
-    CPU_SET(iCore, &lCpuSet);
+    // CPU_SET is a glibc macro that takes a size_t — cast iCore
+    // explicitly to silence -Werror=sign-conversion.
+    CPU_SET(static_cast<std::size_t>(iCore), &lCpuSet);
     pthread_setaffinity_np(pthread_self(), sizeof(lCpuSet), &lCpuSet);
 #else
     (void)iCore;
