@@ -37,6 +37,7 @@
 using namespace astra;
 using namespace astra::ipc;
 using astra::core::CapabilityManager;
+using astra::core::Permission;       // Permission lives in astra::core
 
 namespace
 {
@@ -47,7 +48,7 @@ constexpr std::size_t          kPayload = 256;   // wait-free path
 void pinTo(std::thread& t, int cpu)
 {
     if (cpu < 0) return;
-    cpu_set_t s; CPU_ZERO(&s); CPU_SET(cpu, &s);
+    cpu_set_t s; CPU_ZERO(&s); CPU_SET(static_cast<std::size_t>(cpu), &s);
     (void)::pthread_setaffinity_np(t.native_handle(), sizeof(s), &s);
 }
 

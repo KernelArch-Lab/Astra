@@ -34,6 +34,7 @@ using namespace astra;
 using namespace astra::ipc;
 using astra::core::CapabilityManager;
 using astra::core::CapabilityToken;
+using astra::core::Permission;       // Permission lives in astra::core
 
 namespace
 {

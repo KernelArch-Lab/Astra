@@ -35,6 +35,7 @@
 using namespace astra;
 using namespace astra::ipc;
 using astra::core::CapabilityManager;
+using astra::core::Permission;       // Permission lives in astra::core
 
 namespace
 {
@@ -46,7 +47,7 @@ void pinThreadTo(std::thread& t, int cpu)
     if (cpu < 0) return;
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
-    CPU_SET(cpu, &cpuset);
+    CPU_SET(static_cast<std::size_t>(cpu), &cpuset);
     (void)::pthread_setaffinity_np(t.native_handle(), sizeof(cpuset), &cpuset);
 }
 

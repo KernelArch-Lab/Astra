@@ -38,6 +38,7 @@
 using namespace astra;
 using astra::core::CapabilityManager;
 using astra::core::CapabilityToken;
+using astra::core::Permission;       // Permission lives in astra::core
 
 namespace
 {
