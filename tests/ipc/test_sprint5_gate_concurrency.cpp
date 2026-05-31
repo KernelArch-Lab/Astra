@@ -105,7 +105,7 @@ int main()
                 m.seq        = seq++;
                 auto w = ring.writeGated(sendGate[i], &m, sizeof(m));
                 if (!w.has_value() &&
-                    w.error().code == ErrorCode::PERMISSION_DENIED)
+                    w.error().code() == ErrorCode::PERMISSION_DENIED)
                 {
                     // Record the seq we WOULD have written; this is the
                     // first seq that the consumer must NEVER observe.
