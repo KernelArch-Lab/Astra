@@ -269,6 +269,29 @@ Status NamespaceManager::setup(const SandboxProfile& aProfile,
 // that namespace, the kernel destroys it.
 //
 // For the sandbox root directory (Sprint 2) we make a best-effort cleanup.
+//
+// AUDIT FINDING O7 (2026-05-31) — rollback semantics after pivot_root:
+//
+//   This function CANNOT actually undo certain steps once they have
+//   succeeded. Specifically:
+//     - unshare(CLONE_NEW{USER,PID,NS}) is irreversible for the calling
+//       thread. Closing the fd does not put the thread back in the host
+//       namespaces; it only releases the kernel's reference count.
+//     - The uid_map / gid_map writes are permanent for the new userns.
+//     - After pivot_root() completes, the OLD root has been umount2'd
+//       with MNT_DETACH. There is no path back.
+//
+//   The current implementation runs in the CHILD process (POST_FORK hook,
+//   audit finding O1), so "rollback" really means "give up and _exit".
+//   The caller in IsolationService::applyIsolation propagates the error
+//   to the POST_FORK hook executor, which causes the child to _exit(127)
+//   in process_manager.cpp. That is the correct outcome: a half-set-up
+//   sandbox is not safe to run code in.
+//
+//   This comment exists to record the contract: rollback unwinds fds and
+//   filesystem-side state on a best-effort basis. It does NOT promise to
+//   restore the calling process to its original namespace state. Callers
+//   in a sandbox-already-pivoted state must follow rollback with _exit.
 // ============================================================================
 void NamespaceManager::rollback() noexcept
 {
@@ -277,7 +300,10 @@ void NamespaceManager::rollback() noexcept
     m_fdPidNs   = ScopedFd();
     m_fdUserNs  = ScopedFd();
 
-    // Best-effort sandbox root cleanup (Sprint 2).
+    // Best-effort sandbox root cleanup (Sprint 2). Note: after pivot_root
+    // the path m_szSandboxRoot is no longer reachable from inside the
+    // pivoted view; umount2 will return ENOENT silently. That's fine —
+    // see the audit note above.
     if (!m_szSandboxRoot.empty())
     {
         cleanupSandboxRoot();
@@ -442,10 +468,27 @@ Status NamespaceManager::createMountNamespace()
         ));
     }
 
-    // Build the per-sandbox root path: /tmp/astra_sandbox/<pid>
-    // getpid() here still returns the host PID (we are in the process
-    // that called unshare, not a forked child yet). That is intentional —
-    // it gives us a unique directory name.
+    // Build the per-sandbox root path: /tmp/astra_sandbox/<pid>.
+    //
+    // Audit finding O9 (2026-05-31): /tmp is a world-writable directory.
+    // A local unprivileged attacker who can predict <pid> can pre-create
+    // /tmp/astra_sandbox/<pid> as a symlink to a path of their choosing
+    // (e.g. /var/lib/<victim>), and our subsequent mkdir/mount/pivot_root
+    // chain attaches the bind mounts under attacker-controlled storage.
+    //
+    // Mitigations in the current code:
+    //   - We are now in a CHILD process (POST_FORK hook, audit finding O1),
+    //     so getpid() is the child's PID — unique per spawn rather than the
+    //     runtime PID. That breaks the "every spawn writes the same path"
+    //     foot-gun but doesn't eliminate the race (attacker still has the
+    //     window from fork → setup).
+    //   - SANDBOX_BASE_PATH is mode 0700 (set by an earlier fix); only the
+    //     calling UID can write inside it.
+    //
+    // Residual risk: small. Future work (Sprint 4+): use mkdtemp() with a
+    // random suffix and an O_PATH-anchored mount sequence (mount_setattr
+    // + open_tree) so the path is non-guessable AND the bind mounts are
+    // never resolved via /tmp again.
     m_szSandboxRoot = std::string(SANDBOX_BASE_PATH)
                     + "/"
                     + std::to_string(static_cast<long>(::getpid()));

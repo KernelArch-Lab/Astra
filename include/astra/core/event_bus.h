@@ -184,6 +184,25 @@ using EventHandler = std::function<void(const Event& aEvent)>;
 //   - dispatch() reads from the ring and calls all matching handlers.
 //   - If the ring fills up, oldest events are silently dropped (with
 //     a counter increment for monitoring).
+//
+// KNOWN ISSUE — multi-producer correctness (audit finding O3, 2026-05-31):
+//   The current claim-via-fetch_add → write-payload protocol is racy
+//   with multiple concurrent publishers and a single dispatch reader.
+//   Symptoms: dispatch can observe slots whose payload has not yet been
+//   written by the claiming publisher, and the read head is read as a
+//   plain (non-atomic) U32 from the dispatch thread — formal UB.
+//
+//   This is acceptable today because the only frequent publisher is
+//   ProcessManager (one thread, the runtime main loop), and the rare
+//   second publisher is CapabilityManager's setTokenEventCallback,
+//   which runs while holding the cap spinlock. In practice the race
+//   doesn't fire. But anyone adding a third publisher should either:
+//     (a) restrict publish() to a single thread (document + enforce),
+//     (b) replace the protocol with a Vyukov-style MPSC with per-slot
+//         sequence numbers (~200 LOC, blocked on a free engineer-week).
+//
+//   Deferred to Sprint 11+ in the project roadmap. Until fixed, do not
+//   advertise multi-producer correctness in Paper 1.
 // -------------------------------------------------------------------------
 class EventBus
 {

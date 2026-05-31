@@ -55,6 +55,12 @@ struct ring_buffer;
 
 namespace astra
 {
+
+// Forward-declare core::Runtime so we don't have to pull it in via
+// header — keeps the eBPF header lightweight. The .cpp side does the
+// full include for subscribeToRuntime().
+namespace core { class Runtime; }
+
 namespace ebpf
 {
 
@@ -280,7 +286,32 @@ public:
     Status                         onStop()         override;
     [[nodiscard]] bool             isHealthy() const noexcept override;
 
+    // --- Optional userspace event source (audit finding O8, 2026-05-31) ------
+    //
+    // The kernel-side ring buffer (m_pPoller) only ever receives events
+    // emitted by attached USDT probes / kprobes. The runtime's M-01
+    // EventBus is a separate, fully-userspace event stream that nothing
+    // was wired to consume — M-09's "observability" claim therefore had
+    // no input source for non-USDT events.
+    //
+    // subscribeToRuntime() wires the M-01 EventBus into this service:
+    // every published EventBus event is logged and (optionally) fed
+    // into a user-provided callback. Must be called AFTER onInit() and
+    // BEFORE onStart(); the EventBus contract says subscribe() is only
+    // safe during init phase (before the runtime enters RUNNING).
+    //
+    // Future Sprint 2 work: forward EventBus events into the same
+    // ringbuffer the kernel poller drains, so consumers don't need
+    // to handle two paths.
+    Status subscribeToRuntime(::astra::core::Runtime& aRuntime);
+
 private:
+    // Subscriber handle returned by EventBus::subscribe (audit O8).
+    // Recorded so onStop() could unsubscribe in future, though the
+    // current EventBus contract doesn't expose unsubscribe yet.
+    U32  m_uEventBusSubscriberId = 0;
+    bool m_bSubscribedToEventBus = false;
+
     // ProbeManager handles BPF object loading and USDT attachment
     ProbeManager        m_probeManager;
 

@@ -22,6 +22,8 @@
 // ============================================================================
 #include <astra/ebpf/ebpf_service.h>
 #include <astra/core/logger.h>
+#include <astra/core/runtime.h>      // EventBus subscription (audit O8)
+#include <astra/core/event_bus.h>    // Event, EventType, EventHandler
 #include <astra/common/result.h>
 
 // libbpf: the userspace BPF library we use to load/attach programs and
@@ -534,6 +536,59 @@ EbpfService::EbpfService(std::filesystem::path aProbeDir) noexcept
     , m_bInitialised(false)
     , m_bStarted(false)
 {
+}
+
+// ----------------------------------------------------------------------------
+// subscribeToRuntime — wire the EventBus into this service.
+//
+// Audit finding O8 (2026-05-31): M-09's "observability" claim had no
+// input source for userspace events because nothing called EventBus
+// ::subscribe() from EbpfService. This method closes the loop:
+// callers (e.g. main.cpp / demo_main.cpp / a future production wiring)
+// invoke it AFTER onInit() and BEFORE onStart(), and from that point
+// every event published on the runtime's EventBus is observed by M-09.
+//
+// The handler currently just logs at TRACE level. Sprint 2 work will
+// translate the EventBus Event into an EbpfEventHeader and feed it
+// into the same ring buffer the kernel-side poller drains, so consumers
+// don't have to handle two pipelines.
+// ----------------------------------------------------------------------------
+Status EbpfService::subscribeToRuntime(::astra::core::Runtime& aRuntime)
+{
+    if (m_bSubscribedToEventBus)
+    {
+        // Idempotent — calling twice with the same runtime is fine.
+        return {};
+    }
+
+    auto lHandler = [](const ::astra::core::Event& aEvent) -> void
+    {
+        // For now: just log. Sprint 2 will forward into the EbpfEvent stream.
+        LOG_TRACE(g_logEbpf,
+            "M-09 saw EventBus event: type=" << static_cast<unsigned>(aEvent.m_eType)
+            << " module=" << static_cast<unsigned>(aEvent.m_uSourceModuleId)
+            << " seq=" << aEvent.m_uSequenceNum);
+    };
+
+    auto lSubRes = aRuntime.events().subscribe(
+        ::astra::core::EventType::NONE,    // NONE filter = subscribe to ALL
+        lHandler,
+        "M-09/EbpfService"
+    );
+    if (!lSubRes.has_value())
+    {
+        LOG_WARN(g_logEbpf,
+            "EbpfService::subscribeToRuntime: EventBus::subscribe failed: "
+            << std::string(lSubRes.error().message()));
+        return astra::unexpected(lSubRes.error());
+    }
+
+    m_uEventBusSubscriberId = lSubRes.value();
+    m_bSubscribedToEventBus = true;
+    LOG_INFO(g_logEbpf,
+        "EbpfService: subscribed to runtime EventBus as id="
+        << m_uEventBusSubscriberId);
+    return {};
 }
 
 EbpfService::~EbpfService()
