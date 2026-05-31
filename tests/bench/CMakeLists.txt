@@ -25,6 +25,15 @@ add_executable(bench_baseline_astra_gated baseline_astra_gated.cpp)
 add_executable(bench_baseline_aeron      baseline_aeron.cpp)
 add_executable(bench_baseline_erpc       baseline_erpc.cpp)
 
+# Sprint 8 — additional metrics (throughput, MPSC scaling, revocation,
+# perf counters, pool-size scaling). Each emits its own CSV header so
+# the sweep script keys off the first column.
+add_executable(bench_throughput          bench_throughput.cpp)
+add_executable(bench_throughput_mpsc     bench_throughput_mpsc.cpp)
+add_executable(bench_revocation_latency  bench_revocation_latency.cpp)
+add_executable(bench_perfcounters        bench_perfcounters.cpp)
+add_executable(bench_pool_scaling        bench_pool_scaling.cpp)
+
 foreach(_bench
         bench_baseline_pipe
         bench_baseline_socketpair
@@ -32,7 +41,12 @@ foreach(_bench
         bench_baseline_astra
         bench_baseline_astra_gated
         bench_baseline_aeron
-        bench_baseline_erpc)
+        bench_baseline_erpc
+        bench_throughput
+        bench_throughput_mpsc
+        bench_revocation_latency
+        bench_perfcounters
+        bench_pool_scaling)
     target_include_directories(${_bench}
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR})
@@ -52,6 +66,18 @@ target_link_libraries(bench_baseline_astra_gated
         astra_ipc
         astra_core
         astra_asm_core)
+
+# Sprint 8 metrics — all need the runtime libs.
+target_link_libraries(bench_throughput
+    PRIVATE astra_ipc astra_core astra_asm_core)
+target_link_libraries(bench_throughput_mpsc
+    PRIVATE astra_ipc astra_core astra_asm_core)
+target_link_libraries(bench_revocation_latency
+    PRIVATE astra_ipc astra_core astra_asm_core)
+target_link_libraries(bench_perfcounters
+    PRIVATE astra_core astra_asm_core)
+target_link_libraries(bench_pool_scaling
+    PRIVATE astra_core astra_asm_core)
 
 # --- io_uring: link liburing if present (otherwise the binary self-skips) ---
 find_path(LIBURING_INCLUDE liburing.h)
@@ -99,6 +125,11 @@ add_custom_target(paper1_baselines DEPENDS
     bench_baseline_astra
     bench_baseline_astra_gated
     bench_baseline_aeron
-    bench_baseline_erpc)
+    bench_baseline_erpc
+    bench_throughput
+    bench_throughput_mpsc
+    bench_revocation_latency
+    bench_perfcounters
+    bench_pool_scaling)
 
 message(STATUS "[Paper-1] tests/bench targets configured (build with --target paper1_baselines)")
