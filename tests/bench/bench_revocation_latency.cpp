@@ -96,7 +96,7 @@ uint64_t oneTrial(int poolActive, double tscPerNs)
             auto w = ring.writeGated(sendGate, tx.data(),
                                      static_cast<U32>(kPayload));
             if (!w.has_value() &&
-                w.error().code == ErrorCode::PERMISSION_DENIED)
+                w.error().code() == ErrorCode::PERMISSION_DENIED)
             {
                 tDeniedTsc.store(astra_bench::now(), std::memory_order_release);
                 return;
