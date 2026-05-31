@@ -145,12 +145,19 @@ std::vector<sock_filter> SeccompFilter::buildParanoidFilter()
     //
     // This prevents 32-bit syscall confusion attacks.
     //
-    // jump_true  = 0 means: if equal, skip 0 instructions (fall through)
-    // jump_false = (lAllowedSyscalls.size() * 2) means: skip past all
-    //              the allow-check pairs and land on the KILL instruction.
+    // jump_true  = 0 → if equal, skip 0 instructions (fall through to the
+    //                  reload-syscall-nr instruction, then the check chain).
     //
-    // Each allowed syscall takes 2 instructions (one JUMP + one ALLOW).
-    // So we skip lAllowedSyscalls.size() * 2 instructions to reach KILL.
+    // jump_false = (allowlist.size() * 2 + 1) → on arch mismatch, skip:
+    //                +1 for the reload-syscall-nr instruction, plus
+    //                +(allowlist.size() * 2) for the JEQ/ALLOW pairs.
+    //              Lands directly on the BPF_RET_KILL_PROCESS at the end.
+    //
+    // The +1 is the audit fix: an earlier draft used `... * 2` which
+    // landed on the LAST ALLOW instruction, accidentally ALLOWING the
+    // syscall on every arch mismatch (32-bit syscall confusion path).
+    // The new tracing: arch JEQ at PC=2, after execution PC=3, jf=31
+    // ⇒ PC=34, which is the KILL instruction. Verified by counting.
     // ------------------------------------------------------------------
     lInstructions.push_back(
         BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
@@ -161,7 +168,7 @@ std::vector<sock_filter> SeccompFilter::buildParanoidFilter()
         BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K,
                  AUDIT_ARCH_X86_64,
                  0,
-                 static_cast<uint8_t>(lAllowedSyscalls.size() * 2))
+                 static_cast<uint8_t>(lAllowedSyscalls.size() * 2 + 1))
     );
 
     // ------------------------------------------------------------------
