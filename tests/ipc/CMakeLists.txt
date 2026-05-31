@@ -138,9 +138,22 @@ target_link_libraries(demo_ipc_live
 message(STATUS "  [M-03] demo_ipc_live configured")
 
 # Latency microbenchmark — Track B Sprint 3 of the Paper 1 prep.
-# rdtscp + HDR-style percentiles. CI runs the threaded mode with a
-# small sample count; the full Paper 1 figure is generated on a tuned
-# host with --samples 1000000.
+# rdtscp + HDR-style percentiles. The full Paper 1 figure is generated
+# on a tuned host with --samples 1000000.
+#
+# NOT a ctest gate (audit fix, 2026-05-31). The binary has an internal
+# `p99 > 10 µs` (threaded) / `p99 > 20 µs` (forked) exit gate intended
+# to catch perf regressions on a tuned production host. Under shared
+# CI / Debug -O0 / VM-with-noise that gate trips false-positively
+# (we measured p99 = 2.7 ms in a Debug -O0 build, two orders of
+# magnitude above the threshold and unrelated to the runtime's
+# actual latency on a tuned Release-mode host). This matches the
+# bench_capability_validate precedent (Sprint 4) — both binaries
+# are built-only, run on demand.
+#
+# Run on demand:
+#   cmake --build build --target bench_ipc_latency
+#   ./build/tests/ipc/bench_ipc_latency --threaded --samples 1000000
 add_executable(bench_ipc_latency
     bench_latency.cpp
 )
@@ -150,8 +163,4 @@ target_link_libraries(bench_ipc_latency
         astra_core
         pthread
 )
-add_test(
-    NAME    Sprint3IpcLatencyBench
-    COMMAND bench_ipc_latency --threaded --warmup 1000 --samples 5000
-)
-message(STATUS "  [M-03] bench_ipc_latency configured")
+message(STATUS "  [M-03] bench_ipc_latency configured (NOT a ctest gate)")
