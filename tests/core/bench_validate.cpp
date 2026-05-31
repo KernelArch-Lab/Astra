@@ -51,8 +51,7 @@
 #include <x86intrin.h>
 #endif
 
-using namespace astra::core;
-using astra::Permission;
+using namespace astra::core;     // Permission is already brought in here
 
 namespace
 {

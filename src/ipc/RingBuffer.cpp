@@ -524,7 +524,7 @@ Result<void> RingBuffer::writeGated(
         return fnGateError("writeGated: gate not bound to CapabilityManager + token");
     }
     if (!aGate.m_pManager->validate(aGate.m_token,
-                                    ::astra::Permission::IPC_SEND))
+                                    ::astra::core::Permission::IPC_SEND))
     {
         return fnGateError("writeGated: capability validation failed (revoked or missing IPC_SEND)");
     }
@@ -545,7 +545,7 @@ Result<U32> RingBuffer::readGated(
         ));
     }
     if (!aGate.m_pManager->validate(aGate.m_token,
-                                    ::astra::Permission::IPC_RECV))
+                                    ::astra::core::Permission::IPC_RECV))
     {
         return std::unexpected(makeError(
             ErrorCode::PERMISSION_DENIED,
@@ -566,7 +566,7 @@ Result<void> RingBuffer::writeNotifyGated(
         return fnGateError("writeNotifyGated: gate not bound");
     }
     if (!aGate.m_pManager->validate(aGate.m_token,
-                                    ::astra::Permission::IPC_SEND))
+                                    ::astra::core::Permission::IPC_SEND))
     {
         return fnGateError("writeNotifyGated: capability validation failed");
     }
@@ -592,7 +592,7 @@ Result<U32> RingBuffer::readWaitGated(
     while (true)
     {
         if (!aGate.m_pManager->validate(aGate.m_token,
-                                        ::astra::Permission::IPC_RECV))
+                                        ::astra::core::Permission::IPC_RECV))
         {
             return std::unexpected(makeError(
                 ErrorCode::PERMISSION_DENIED,

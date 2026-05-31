@@ -35,8 +35,8 @@
 #include <cstdio>
 #include <cstring>
 
-using namespace astra::core;
-using astra::Permission;
+using namespace astra::core;   // Permission, CapabilityToken, CapabilityManager
+using astra::U64;              // U64 lives in `astra`, not `astra::core`
 
 namespace
 {

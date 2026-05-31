@@ -36,8 +36,7 @@
 #include <thread>
 #include <vector>
 
-using namespace astra::core;
-using astra::Permission;
+using namespace astra::core;     // Permission is already brought in here
 
 namespace
 {

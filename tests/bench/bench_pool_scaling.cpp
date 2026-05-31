@@ -26,7 +26,7 @@
 #include <cstdlib>
 #include <vector>
 
-using astra::Permission;
+using astra::core::Permission;       // Permission lives in astra::core
 using astra::core::CapabilityManager;
 using astra::core::CapabilityToken;
 

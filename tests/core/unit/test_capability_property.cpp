@@ -40,9 +40,8 @@
 #include <unordered_set>
 #include <vector>
 
-using namespace astra::core;
-using astra::Permission;
-using astra::U64;
+using namespace astra::core;     // Permission is already brought in here
+using astra::U64;                // U64 lives in astra, not astra::core
 
 namespace
 {
