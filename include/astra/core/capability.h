@@ -257,12 +257,34 @@ public:
     void setTokenEventCallback(TokenEventCallback aCallback);
 
 private:
-    // Internal token slot - adds revocation metadata
+    // Internal token slot — adds revocation metadata.
+    //
+    // m_bActive and m_uRevokedAtEpoch are read by validate() WITHOUT
+    // the spinlock; create/derive/revoke take the spinlock for mutual
+    // exclusion among writers, but readers must see consistent state.
+    //
+    // They are std::atomic so the C++ memory model gives us the
+    // happens-before edges. The pattern:
+    //
+    //   writer (revoke, under spinlock):
+    //       store m_uRevokedAtEpoch  (release)
+    //       store m_bActive = false  (release)
+    //
+    //   reader (validate, no spinlock):
+    //       load  m_bActive          (acquire)
+    //       load  m_uRevokedAtEpoch  (acquire)
+    //
+    // The acquire on m_bActive synchronises with the writer's release;
+    // any token-UID bytes written before the release are visible to
+    // the reader after the acquire. This is what makes the "no stale
+    // validate" property hold on ARM64 / RISC-V as well as x86 TSO.
+    //
+    // (audit finding C1, 2026-05-31)
     struct TokenSlot
     {
-        CapabilityToken m_token;
-        bool            m_bActive;
-        U64             m_uRevokedAtEpoch;  // 0 = not revoked
+        CapabilityToken     m_token;
+        std::atomic<bool>   m_bActive;
+        std::atomic<U64>    m_uRevokedAtEpoch;  // 0 = not revoked
     };
 
     // Token pool (pre-allocated, no heap alloc after init)
@@ -289,7 +311,14 @@ private:
     // O(1): the slot index is recoverable from the token without a
     // pool scan, and 96 bits of randomness keep the UID unforgeable
     // (2^96 search space).
-    void generateTokenId(U32 aUSlot, std::array<U64, 2>& aArrOut);
+    //
+    // Returns Status::ok on success, or an error if RDRAND failed for
+    // either limb. On failure NOTHING is written to aArrOut — the caller
+    // must propagate the error and refuse to mint a token. This is the
+    // hardening from audit finding C2 (RDRAND fallback was previously
+    // a predictable XOR of public counters, collapsing 2^96 forgery
+    // resistance to zero).
+    [[nodiscard]] Status generateTokenId(U32 aUSlot, std::array<U64, 2>& aArrOut);
 
     // Static helpers for the slot-index packing. These are the inverse
     // of each other and are the central trick of the Sprint 4 fast path.
@@ -303,7 +332,20 @@ private:
         return static_cast<U32>(aUUidHi >> 32);
     }
 
-    U32 revokeDescendants(const std::array<U64, 2>& aArrParentId);
+    // Iteratively cascade-revoke every descendant of the parent token.
+    //
+    // Implementation: BFS over a worklist of parent IDs, single pass per
+    // generation, capped at m_uMaxTokens iterations total regardless of
+    // chain depth. Replaces the previous unbounded recursion which had
+    // an O(N*D) cost under the spinlock and a real stack-overflow path
+    // on a deep derivation chain (audit finding C3).
+    //
+    // aUEpoch is the epoch returned by revoke()'s fetch_add — passing
+    // it in (instead of re-loading m_uCurrentEpoch inside) keeps all
+    // tokens in one logical revoke transaction at the SAME epoch
+    // (audit finding C4).
+    U32 revokeDescendants(const std::array<U64, 2>& aArrParentId,
+                          U64 aUEpoch);
 };
 
 } // namespace core

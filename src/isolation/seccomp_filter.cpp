@@ -99,6 +99,23 @@ std::vector<sock_filter> SeccompFilter::buildParanoidFilter()
     // The PARANOID allowlist from the Sprint 3 spec.
     // These are the ONLY syscalls the sandboxed process may call.
     // __NR_* constants are defined in <sys/syscall.h> for the current arch.
+    //
+    // CRITICAL CORRECTNESS (audit finding O2, 2026-05-31):
+    //   The filter is installed in the child's POST_FORK hook BEFORE
+    //   ProcessManager::spawn() invokes execve() on the target binary.
+    //   If execve is not on the allowlist, the seccomp kernel filter
+    //   kills the child with SIGSYS at the execve(2) syscall — exit 159
+    //   — before the binary ever loads. No process spawned with the
+    //   PARANOID profile would actually run.
+    //
+    //   Adding execve / execveat is the conventional fix used by gVisor,
+    //   nsjail, firejail, bubblewrap and friends. The window is tight
+    //   (one syscall, taken exactly once at process startup) and the
+    //   downstream binary cannot itself re-execve because once the
+    //   child has reached the target binary's _start, the filter still
+    //   blocks anything outside the allowlist — the binary CAN call
+    //   execve but the resulting process inherits the same filter
+    //   (PR_SET_NO_NEW_PRIVS), so any re-exec is gated by the same list.
     const std::vector<int> lAllowedSyscalls =
     {
         __NR_read,          // read data from a file descriptor
@@ -116,6 +133,9 @@ std::vector<sock_filter> SeccompFilter::buildParanoidFilter()
         __NR_futex,         // fast userspace mutex (used by pthreads)
         __NR_sigaltstack,   // set/get signal stack
         __NR_arch_prctl,    // set architecture-specific thread state
+        __NR_execve,        // exec the target binary (required by the
+                            //   POST_FORK -> execve handoff)
+        __NR_execveat,      // exec-at-fd variant; some libcs prefer this
     };
 
     std::vector<sock_filter> lInstructions;

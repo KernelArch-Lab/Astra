@@ -11,6 +11,7 @@
 #include <cstring>
 #include <new>
 #include <thread>
+#include <vector>   // iterative BFS worklist in revokeDescendants
 
 static const char* LOG_TAG = "capability";
 
@@ -79,12 +80,15 @@ Status CapabilityManager::init(U32 aUMaxTokens)
         ));
     }
 
-    // Zero-initialise all slots
+    // Zero-initialise all slots. The atomic fields use std::atomic_init-
+    // equivalent (assignment to atomic) which is sequentially consistent;
+    // happens before any thread can observe the pool since we're still
+    // in init() with no spinlock holders yet.
     for (U32 lUIdx = 0; lUIdx < aUMaxTokens; ++lUIdx)
     {
         m_pTokenPool[lUIdx].m_token = CapabilityToken::null();
-        m_pTokenPool[lUIdx].m_bActive = false;
-        m_pTokenPool[lUIdx].m_uRevokedAtEpoch = 0;
+        m_pTokenPool[lUIdx].m_bActive.store(false, std::memory_order_relaxed);
+        m_pTokenPool[lUIdx].m_uRevokedAtEpoch.store(0, std::memory_order_relaxed);
     }
 
     m_uMaxTokens = aUMaxTokens;
@@ -155,18 +159,30 @@ Result<CapabilityToken> CapabilityManager::create(Permission aEPerms, U64 aUOwne
     U32 lUSlot = lSlotResult.value();
 
     // Generate a unique 128-bit token ID with the slot index packed into
-    // the high 32 bits — see generateTokenId rationale.
+    // the high 32 bits — see generateTokenId rationale. Fails closed
+    // on RDRAND failure (audit finding C2): a token with predictable
+    // bits is worse than no token.
     CapabilityToken lToken;
-    generateTokenId(lUSlot, lToken.m_arrUId);
+    {
+        Status lGenSt = generateTokenId(lUSlot, lToken.m_arrUId);
+        if (!lGenSt.has_value())
+        {
+            releaseSpinlock();
+            return astra::unexpected(lGenSt.error());
+        }
+    }
     lToken.m_ePermissions = aEPerms;
     lToken.m_uEpoch = m_uCurrentEpoch.load(std::memory_order_acquire);
     lToken.m_uOwnerId = aUOwnerId;
     lToken.m_arrUParentId = {0, 0};   // root token: no parent
 
-    // Store in the pool
+    // Store token data into the slot BEFORE publishing m_bActive=true.
+    // The release store on m_bActive synchronises with the acquire load
+    // in validate(); any reader that sees m_bActive==true must also see
+    // the token bytes we just wrote.  (audit finding C1)
     m_pTokenPool[lUSlot].m_token = lToken;
-    m_pTokenPool[lUSlot].m_bActive = true;
-    m_pTokenPool[lUSlot].m_uRevokedAtEpoch = 0;
+    m_pTokenPool[lUSlot].m_uRevokedAtEpoch.store(0, std::memory_order_relaxed);
+    m_pTokenPool[lUSlot].m_bActive.store(true, std::memory_order_release);
 
     m_uActiveCount.fetch_add(1, std::memory_order_acq_rel);
 
@@ -244,15 +260,24 @@ Result<CapabilityToken> CapabilityManager::derive(
     U32 lUSlot = lSlotResult.value();
 
     CapabilityToken lChildToken;
-    generateTokenId(lUSlot, lChildToken.m_arrUId);
+    {
+        Status lGenSt = generateTokenId(lUSlot, lChildToken.m_arrUId);
+        if (!lGenSt.has_value())
+        {
+            releaseSpinlock();
+            return astra::unexpected(lGenSt.error());
+        }
+    }
     lChildToken.m_ePermissions = aEChildPerms;
     lChildToken.m_uEpoch = m_uCurrentEpoch.load(std::memory_order_acquire);
     lChildToken.m_uOwnerId = aUNewOwnerId;
     lChildToken.m_arrUParentId = aParent.m_arrUId;
 
+    // Same publish pattern as create() — release store on m_bActive
+    // is the synchronisation point. (audit finding C1)
     m_pTokenPool[lUSlot].m_token = lChildToken;
-    m_pTokenPool[lUSlot].m_bActive = true;
-    m_pTokenPool[lUSlot].m_uRevokedAtEpoch = 0;
+    m_pTokenPool[lUSlot].m_uRevokedAtEpoch.store(0, std::memory_order_relaxed);
+    m_pTokenPool[lUSlot].m_bActive.store(true, std::memory_order_release);
 
     m_uActiveCount.fetch_add(1, std::memory_order_acq_rel);
 
@@ -310,10 +335,13 @@ Result<CapabilityToken> CapabilityManager::derive(
 // already-doomed tokens.
 //
 // Concurrency: the validate path is lock-free. m_bActive and
-// m_uRevokedAtEpoch are read with relaxed semantics (matching the
-// pre-existing slow-path scan). create/derive/revoke serialise through
-// the spinlock; their writes become visible via the spinlock release
-// store-acquire pair before any subsequent validate sees a new slot.
+// m_uRevokedAtEpoch are std::atomic; we load them with acquire to
+// synchronise with the release stores in create/derive/revoke. This
+// gives us the happens-before edge in the C++ memory model — on
+// ARM64/RISC-V it lowers to the appropriate acquire/release fences,
+// on x86 it costs nothing extra (TSO is already strong enough) but
+// is required for correctness under the model and for compiler
+// reordering. (audit finding C1, 2026-05-31)
 // ============================================================================
 bool CapabilityManager::validate(
     const CapabilityToken&  aToken,
@@ -346,7 +374,17 @@ bool CapabilityManager::validate(
     }
 
     const TokenSlot& lSlot = m_pTokenPool[lUSlot];
-    if (!lSlot.m_bActive || lSlot.m_uRevokedAtEpoch != 0)
+
+    // Acquire load on m_bActive synchronises-with the release store in
+    // create/derive (publishing a freshly-stored token) and in revoke
+    // (publishing deactivation). After this load returns true, the token
+    // bytes the writer wrote are visible. After returning false, we
+    // reject without ever reading the (possibly mid-wipe) token bytes.
+    if (!lSlot.m_bActive.load(std::memory_order_acquire))
+    {
+        return false;
+    }
+    if (lSlot.m_uRevokedAtEpoch.load(std::memory_order_acquire) != 0)
     {
         return false;
     }
@@ -382,6 +420,9 @@ Result<U32> CapabilityManager::revoke(const CapabilityToken& aToken)
 
     acquireSpinlock();
 
+    // fetch_add returns the OLD epoch; the NEW current epoch is
+    // lUEpoch + 1. We stamp the revoked slots with lUEpoch so the
+    // "revoked at this epoch" record matches the transition boundary.
     U64 lUEpoch = m_uCurrentEpoch.fetch_add(1, std::memory_order_acq_rel);
     U32 lURevokedCount = 0;
 
@@ -392,34 +433,59 @@ Result<U32> CapabilityManager::revoke(const CapabilityToken& aToken)
     if (lUSlot < m_uMaxTokens)
     {
         TokenSlot& lSlot = m_pTokenPool[lUSlot];
-        if (lSlot.m_bActive &&
-            lSlot.m_uRevokedAtEpoch == 0 &&
+        // Active+not-revoked AND UID matches — relaxed loads are fine
+        // here because we hold the spinlock so no concurrent writer.
+        if (lSlot.m_bActive.load(std::memory_order_relaxed) &&
+            lSlot.m_uRevokedAtEpoch.load(std::memory_order_relaxed) == 0 &&
             lSlot.m_token.m_arrUId[0] == aToken.m_arrUId[0] &&
             lSlot.m_token.m_arrUId[1] == aToken.m_arrUId[1])
         {
-            lSlot.m_uRevokedAtEpoch = lUEpoch;
-            ++lURevokedCount;
-
+            // Fire the event callback BEFORE deactivation/wipe — it
+            // needs to read the token (owner id etc.).
             if (m_fnTokenEvent)
             {
                 m_fnTokenEvent(lSlot.m_token, "revoked");
             }
 
-            // Securely wipe the token data
+            // Order matters (audit finding C1+C9):
+            //   1. Stamp revoke epoch  (release).
+            //   2. Deactivate          (release) — readers seeing this
+            //      will NOT read the token bytes below.
+            //   3. Wipe token bytes — concurrent readers that already
+            //      passed step 2's load still see m_bActive==true but
+            //      ct_compare against wiped bytes returns "differs",
+            //      so validate() returns false.
+            lSlot.m_uRevokedAtEpoch.store(lUEpoch, std::memory_order_release);
+            lSlot.m_bActive.store(false, std::memory_order_release);
             asm_secure_wipe(&lSlot.m_token, sizeof(CapabilityToken));
-            lSlot.m_bActive = false;
+
+            ++lURevokedCount;
         }
     }
 
-    // Cascade: revoke all descendants
+    // Cascade: revoke all descendants. Pass lUEpoch through so every
+    // token revoked in this transaction shares the same stamp — needed
+    // for audit/replay coherence (finding C4) AND moved to an iterative
+    // BFS to bound stack depth (finding C3).
     if (lURevokedCount > 0)
     {
-        lURevokedCount += revokeDescendants(aToken.m_arrUId);
+        lURevokedCount += revokeDescendants(aToken.m_arrUId, lUEpoch);
     }
 
     if (lURevokedCount > 0)
     {
         U32 lUPrev = m_uActiveCount.load(std::memory_order_acquire);
+        if (lURevokedCount > lUPrev)
+        {
+            // Surface, don't mask. If we ever revoke more tokens than
+            // were active, something is wrong upstream (double-visit
+            // in cascade, or active-count drift). Saturate to keep
+            // the counter sane, but emit a security alert. (C5)
+            ASTRA_LOG_SEC_ALERT(LOG_TAG,
+                "activeTokenCount underflow: revoked=%u but active=%u "
+                "— possible cascade double-visit",
+                lURevokedCount, lUPrev);
+        }
         U32 lUNew = (lURevokedCount <= lUPrev) ? (lUPrev - lURevokedCount) : 0;
         m_uActiveCount.store(lUNew, std::memory_order_release);
     }
@@ -479,9 +545,13 @@ void CapabilityManager::releaseSpinlock() const noexcept
 
 Result<U32> CapabilityManager::findFreeSlot() const
 {
+    // We hold the spinlock when called from create/derive, so no
+    // concurrent writer. Relaxed load is fine — the spinlock
+    // release/acquire is the synchronisation point for the OUTER
+    // call ordering.
     for (U32 lUIdx = 0; lUIdx < m_uMaxTokens; ++lUIdx)
     {
-        if (!m_pTokenPool[lUIdx].m_bActive)
+        if (!m_pTokenPool[lUIdx].m_bActive.load(std::memory_order_relaxed))
         {
             return lUIdx;
         }
@@ -494,62 +564,122 @@ Result<U32> CapabilityManager::findFreeSlot() const
     ));
 }
 
-void CapabilityManager::generateTokenId(U32 aUSlot, std::array<U64, 2>& aArrOut)
+Status CapabilityManager::generateTokenId(U32 aUSlot, std::array<U64, 2>& aArrOut)
 {
     // Use hardware RNG via M-21 for unforgeable token bits.
     // 96 bits total of randomness (32 in the low half of arrUId[0],
     // 64 in arrUId[1]) — the high 32 bits of arrUId[0] are reserved
     // for the slot index so validate() can avoid the linear scan.
+    //
+    // Fail-closed on any RDRAND failure (audit finding C2). The
+    // previous code substituted predictable XOR-of-epoch-and-counter
+    // values, collapsing the 2^96 forgery search space to zero on
+    // hosts where RDRAND is flaky (VMs without VirtIO-RNG, post
+    // thermal throttle, nested virt). A token with predictable bits
+    // is strictly worse than no token — the caller must propagate
+    // the error so the user sees the failure rather than holding a
+    // forgeable token.
     U64 lURandHi = 0;
     U64 lURandLo = 0;
 
     if (asm_rdrand64(&lURandHi) != 0)
     {
-        ASTRA_LOG_WARN(LOG_TAG, "RDRAND failed for token ID generation (high)");
-        lURandHi = static_cast<U64>(m_uCurrentEpoch.load()) ^ 0xDEADBEEFCAFEBABEULL;
+        ASTRA_LOG_SEC_ALERT(LOG_TAG,
+            "RDRAND failed for token ID (high limb) — refusing to mint token");
+        return astra::unexpected(makeError(
+            ErrorCode::INTERNAL_ERROR,
+            ErrorCategory::CORE,
+            "RDRAND failed — cannot generate unforgeable token UID"
+        ));
     }
     if (asm_rdrand64(&lURandLo) != 0)
     {
-        ASTRA_LOG_WARN(LOG_TAG, "RDRAND failed for token ID generation (low)");
-        lURandLo = static_cast<U64>(m_uActiveCount.load()) ^ 0xFEEDFACE12345678ULL;
+        ASTRA_LOG_SEC_ALERT(LOG_TAG,
+            "RDRAND failed for token ID (low limb) — refusing to mint token");
+        return astra::unexpected(makeError(
+            ErrorCode::INTERNAL_ERROR,
+            ErrorCategory::CORE,
+            "RDRAND failed — cannot generate unforgeable token UID"
+        ));
     }
 
     // Pack: high 32 bits of arrUId[0] = slot index; low 32 bits = random.
     // arrUId[1] is fully random.
     aArrOut[0] = packSlotIntoUid(aUSlot) | (lURandHi & 0xFFFFFFFFULL);
     aArrOut[1] = lURandLo;
+    return {};
 }
 
-U32 CapabilityManager::revokeDescendants(const std::array<U64, 2>& aArrParentId)
+// Iterative BFS cascade-revoke.
+//
+// Implementation strategy (audit findings C3 + C4):
+//   - Work queue of parent IDs we still need to scan for children.
+//   - One scan per parent ID. Each scan is O(m_uMaxTokens).
+//   - Total work bounded: the queue can never contain more distinct
+//     parent IDs than there are active slots, so the worst case is
+//     O(m_uMaxTokens^2) iterations — no worse than the prior
+//     recursive version's worst case, but with bounded STACK depth
+//     (a small std::vector instead of deep recursion).
+//   - Single epoch (aUEpoch, passed from the caller) is stamped on
+//     every descendant, so all tokens revoked in one logical revoke
+//     transaction share the same epoch. This is what makes per-
+//     transaction audit/replay records coherent (finding C4).
+U32 CapabilityManager::revokeDescendants(
+    const std::array<U64, 2>& aArrParentId,
+    U64                       aUEpoch)
 {
     U32 lURevokedCount = 0;
-    U64 lUEpoch = m_uCurrentEpoch.load(std::memory_order_acquire);
 
-    // Collect all direct children and revoke them
-    for (U32 lUIdx = 0; lUIdx < m_uMaxTokens; ++lUIdx)
+    // Worklist of parent IDs whose children we still need to find.
+    // Reserved capacity is a hint; pool size is the upper bound on
+    // distinct parents ever enqueued.
+    std::vector<std::array<U64, 2>> lVWork;
+    lVWork.reserve(m_uMaxTokens);
+    lVWork.push_back(aArrParentId);
+
+    while (!lVWork.empty())
     {
-        TokenSlot& lSlot = m_pTokenPool[lUIdx];
-        if (lSlot.m_bActive &&
-            lSlot.m_uRevokedAtEpoch == 0 &&
-            lSlot.m_token.m_arrUParentId[0] == aArrParentId[0] &&
-            lSlot.m_token.m_arrUParentId[1] == aArrParentId[1])
-        {
-            // Revoke this descendant
-            std::array<U64, 2> lArrChildId = lSlot.m_token.m_arrUId;
+        const std::array<U64, 2> lArrParent = lVWork.back();
+        lVWork.pop_back();
 
-            lSlot.m_uRevokedAtEpoch = lUEpoch;
-            ++lURevokedCount;
+        for (U32 lUIdx = 0; lUIdx < m_uMaxTokens; ++lUIdx)
+        {
+            TokenSlot& lSlot = m_pTokenPool[lUIdx];
+
+            // Relaxed loads — spinlock-held context, no concurrent writer.
+            if (!lSlot.m_bActive.load(std::memory_order_relaxed))
+            {
+                continue;
+            }
+            if (lSlot.m_uRevokedAtEpoch.load(std::memory_order_relaxed) != 0)
+            {
+                continue;
+            }
+            if (lSlot.m_token.m_arrUParentId[0] != lArrParent[0] ||
+                lSlot.m_token.m_arrUParentId[1] != lArrParent[1])
+            {
+                continue;
+            }
+
+            // Snapshot the child's UID BEFORE wiping — we need it as
+            // the next-generation parent ID for the BFS.
+            std::array<U64, 2> lArrChildId = lSlot.m_token.m_arrUId;
 
             if (m_fnTokenEvent)
             {
                 m_fnTokenEvent(lSlot.m_token, "revoked");
             }
 
+            // Same ordered deactivation pattern as revoke() (C1+C9):
+            // stamp epoch, publish deactivation, then wipe.
+            lSlot.m_uRevokedAtEpoch.store(aUEpoch, std::memory_order_release);
+            lSlot.m_bActive.store(false, std::memory_order_release);
             asm_secure_wipe(&lSlot.m_token, sizeof(CapabilityToken));
-            lSlot.m_bActive = false;
 
-            // Recurse: revoke this child's descendants too
-            lURevokedCount += revokeDescendants(lArrChildId);
+            ++lURevokedCount;
+
+            // Enqueue this child for the next BFS layer.
+            lVWork.push_back(lArrChildId);
         }
     }
 

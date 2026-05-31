@@ -105,17 +105,45 @@ Status IsolationService::onStart()
         ));
     }
 
-    // Register our isolation hook with ProcessManager.
-    // The lambda captures `this` — the IsolationService instance.
-    // When ProcessManager calls this lambda, it passes the ProcessId
-    // and the IsolationProfile from the ProcessConfig.
-    m_runtime.processes().setIsolationHook(
-        [this](ProcessId                       aUPid,
-               const core::IsolationProfile&   aProfile) -> Status
+    // ----------------------------------------------------------------
+    // Register the isolation hook on the POST_FORK chain.
+    //
+    // CRITICAL CORRECTNESS (audit finding O1, 2026-05-31):
+    //   The previous code used the legacy ProcessManager::setIsolationHook()
+    //   slot, which fires in the PARENT before fork(). That meant
+    //   NamespaceManager::setup() — which calls unshare(), pivot_root(),
+    //   and seccomp prctl() — ran against the runtime itself. First spawn
+    //   would sandbox the runtime; the next fork() would be killed by
+    //   the just-installed seccomp filter on the parent. Catastrophic.
+    //
+    //   POST_FORK is invoked by ProcessManager::spawn() AFTER fork(),
+    //   INSIDE the child process (process_manager.cpp ~line 363). That
+    //   is the correct context: only the child gets unshared/pivoted/
+    //   seccomp'd; the parent runtime is untouched.
+    //
+    //   Priority 0 ⇒ isolation runs first in the POST_FORK chain (before
+    //   any recording / profiling hook a future M-05/M-17 might register).
+    // ----------------------------------------------------------------
+    core::HookEntry lHook(
+        [this](core::ProcessId                  aUPid,
+               const core::IsolationProfile&    aProfile) -> Status
         {
             return applyIsolation(aUPid, aProfile);
-        }
+        },
+        /*moduleId*/ core::ModuleId::ISOLATION,
+        /*priority*/ 0,
+        /*name    */ "M-02/IsolationService::applyIsolation"
     );
+
+    Status lRegSt = m_runtime.processes().hooks().registerHook(
+        core::HookPoint::POST_FORK, lHook);
+    if (!lRegSt.has_value())
+    {
+        ASTRA_LOG_ERROR(LOG_TAG,
+            "IsolationService: failed to register POST_FORK hook: %s",
+            std::string(lRegSt.error().message()).c_str());
+        return lRegSt;
+    }
 
     m_bStarted = true;
     return {};
@@ -126,8 +154,13 @@ Status IsolationService::onStart()
 // ============================================================================
 Status IsolationService::onStop()
 {
-    // Remove the hook so ProcessManager doesn't call into us after we stop
-    // We pass an empty function (nullptr-equivalent) to clear the hook
+    // Unregister every hook this module installed (currently the single
+    // POST_FORK isolation hook). unregisterByModule returns the count
+    // removed; we don't fail onStop() if it's already gone.
+    m_runtime.processes().hooks().unregisterByModule(core::ModuleId::ISOLATION);
+
+    // Also clear the legacy single-slot hook, just in case some other
+    // path populated it. Defence-in-depth — a no-op when already null.
     m_runtime.processes().setIsolationHook(nullptr);
 
     if (m_pProfileEngine)
