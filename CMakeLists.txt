@@ -148,10 +148,16 @@ endif()
 
 # --------------------------------------------------------------------------
 # Apply global compile and link options
+#
+# IMPORTANT: gate flags to C / CXX only — NASM (ASM_NASM language) has a
+# completely different CLI. In particular it interprets `-f<x>` as an
+# output-format directive, so passing `-fstack-protector-strong` causes
+# `nasm: fatal: unrecognised output format 'stack-protector-strong'`.
+# (Caught on first Fedora build, 2026-05-31.)
 # --------------------------------------------------------------------------
-add_compile_options(${ASTRA_WARNING_FLAGS})
-add_compile_options(${ASTRA_HARDENING_FLAGS})
-add_compile_options(${ASTRA_SANITIZER_FLAGS})
+add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:${ASTRA_WARNING_FLAGS}>)
+add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:${ASTRA_HARDENING_FLAGS}>)
+add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:${ASTRA_SANITIZER_FLAGS}>)
 add_link_options(${ASTRA_HARDENING_LINKER_FLAGS})
 add_link_options(${ASTRA_SANITIZER_FLAGS})
 

@@ -167,16 +167,24 @@ cmd_check() {
         fi
     done
 
-    # Sysctls (warn-only — sysctl subcommand fixes them)
-    local userns
-    userns="$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || echo 1)"
-    if [[ "$userns" -eq 0 ]]; then
-        printf '  %sWARN%s  kernel.unprivileged_userns_clone=0 — M-02 tests will need sudo\n' \
-            "$(_clr '1;33')" "$(_clr 0)"
-        printf '         fix:  %s sysctl\n' "$0"
+    # Sysctls (warn-only — sysctl subcommand fixes them).
+    # Modern Fedora kernels (~5.18+) removed kernel.unprivileged_userns_clone
+    # because user namespaces are now always allowed. Treat a missing key
+    # as "kernel grants by default" → OK.
+    if [[ ! -e /proc/sys/kernel/unprivileged_userns_clone ]]; then
+        printf '  %sOK%s    kernel.unprivileged_userns_clone (not exposed; always-allowed on this kernel)\n' \
+            "$(_clr '1;32')" "$(_clr 0)"
     else
-        printf '  %sOK%s    kernel.unprivileged_userns_clone=%s\n' \
-            "$(_clr '1;32')" "$(_clr 0)" "$userns"
+        local userns
+        userns="$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || echo 1)"
+        if [[ "$userns" -eq 0 ]]; then
+            printf '  %sWARN%s  kernel.unprivileged_userns_clone=0 — M-02 tests will need sudo\n' \
+                "$(_clr '1;33')" "$(_clr 0)"
+            printf '         fix:  %s sysctl\n' "$0"
+        else
+            printf '  %sOK%s    kernel.unprivileged_userns_clone=%s\n' \
+                "$(_clr '1;32')" "$(_clr 0)" "$userns"
+        fi
     fi
 
     local paranoid
@@ -223,16 +231,42 @@ cmd_check() {
 # ===========================================================================
 cmd_sysctl() {
     info "Enabling kernel sysctls (sudo)"
-    sudo sysctl -w kernel.unprivileged_userns_clone=1
-    sudo sysctl -w kernel.perf_event_paranoid=1
-    # Persist
-    cat <<EOF | sudo tee /etc/sysctl.d/99-astra.conf >/dev/null
-# Astra Runtime — kernel toggles required by M-02 isolation tests
-# and M-09 / paper-1 perfcounter benchmark.
-kernel.unprivileged_userns_clone=1
-kernel.perf_event_paranoid=1
-EOF
-    ok "sysctls applied and persisted to /etc/sysctl.d/99-astra.conf"
+
+    # Apply each sysctl independently — modern Fedora kernels no longer
+    # expose kernel.unprivileged_userns_clone (the gate was removed in
+    # ~5.18 and user namespaces are always available without it). Treat
+    # missing keys as a soft skip rather than killing the script.
+    local persist=()
+    _apply_sysctl() {
+        local key="$1" val="$2"
+        if [[ ! -e "/proc/sys/${key//./\/}" ]]; then
+            printf '  %sskip%s   %s — not exposed on this kernel (treated as default ok)\n' \
+                "$(_clr '1;33')" "$(_clr 0)" "$key"
+            return 0
+        fi
+        if sudo sysctl -w "$key=$val" >/dev/null; then
+            printf '  %sOK%s     %s = %s\n' "$(_clr '1;32')" "$(_clr 0)" "$key" "$val"
+            persist+=( "$key=$val" )
+        else
+            warn "Failed to set $key=$val"
+            return 1
+        fi
+    }
+
+    _apply_sysctl kernel.unprivileged_userns_clone 1 || true
+    _apply_sysctl kernel.perf_event_paranoid 1 || true
+
+    # Persist only the ones that actually applied.
+    if [[ ${#persist[@]} -gt 0 ]]; then
+        {
+            echo "# Astra Runtime — kernel toggles required by M-02 isolation tests"
+            echo "# and M-09 / paper-1 perfcounter benchmark."
+            for kv in "${persist[@]}"; do echo "$kv"; done
+        } | sudo tee /etc/sysctl.d/99-astra.conf >/dev/null
+        ok "sysctls applied and persisted to /etc/sysctl.d/99-astra.conf"
+    else
+        warn "No applicable sysctls to persist on this kernel."
+    fi
 }
 
 # ===========================================================================

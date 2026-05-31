@@ -81,8 +81,12 @@ inline Stats summarise(std::vector<uint64_t>& v, double fTscPerNs)
     if (v.empty()) return s;
     std::sort(v.begin(), v.end());
     auto at = [&](double pct) {
-        size_t i = std::min<size_t>(static_cast<size_t>(pct * v.size()),
-                                    v.size() - 1);
+        // Explicit double-cast of size() to silence Clang 21's
+        // -Wimplicit-int-float-conversion (-Werror). Truncation to
+        // size_t happens explicitly afterwards.
+        size_t i = std::min<size_t>(
+            static_cast<size_t>(pct * static_cast<double>(v.size())),
+            v.size() - 1);
         return static_cast<double>(v[i]) / fTscPerNs;
     };
     long double sum = 0;
