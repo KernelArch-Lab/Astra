@@ -35,9 +35,34 @@ namespace
 constexpr const char* LOG_TAG       = "ipc_ring";
 constexpr U32         SMALL_MSG_MAX = 256U;  // threshold: fetch_add vs CAS
 
-// Sequence number written into every SKIP sentinel so the reader can
-// identify and discard wasted slots left by overcommitting producers.
-constexpr U32 SKIP_SENTINEL_SEQ = 0xFFFF'FFFFU;
+// SKIP sentinel scheme (audit finding C10, 2026-05-31).
+//
+// Previous implementation marked SKIP records by setting m_uSequenceNo
+// to 0xFFFF'FFFF. After ~4 billion writes (≈7 minutes at the Paper-1
+// claimed throughput of ~10M msgs/s), a legitimate writer's incrementing
+// sequence number would collide with the sentinel and the reader would
+// silently drop the real message.
+//
+// New scheme: the SKIP bit lives in the HIGH bit of m_uPayloadBytes.
+// Real payloads can never exceed 2^31 - 1 bytes (2 GiB), and the ring
+// itself is only 2 MiB by default — so the high bit is forever free
+// for use as a SKIP flag. The sequence-number space is fully recovered
+// for the writer's monotonic counter and never collides with a sentinel.
+//
+// Wire compatibility: this is an internal protocol; no external producers
+// or replay tools consume the SKIP record (the reader silently discards
+// it). Changing the encoding here is safe.
+constexpr U32 SKIP_PAYLOAD_FLAG = 0x8000'0000U;
+constexpr U32 PAYLOAD_LEN_MASK  = 0x7FFF'FFFFU;
+
+constexpr bool fnIsSkipRecord(U32 aUPayloadBytes) noexcept
+{
+    return (aUPayloadBytes & SKIP_PAYLOAD_FLAG) != 0U;
+}
+constexpr U32 fnPayloadLen(U32 aUPayloadBytes) noexcept
+{
+    return aUPayloadBytes & PAYLOAD_LEN_MASK;
+}
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -222,9 +247,13 @@ Result<void> RingBuffer::write(const void* aData, U32 aPayloadLen) noexcept
         {
             // Overcommitted: write a SKIP sentinel so the reader can
             // advance past our claimed-but-invalid slot, then bail out.
+            // SKIP flag in high bit; the low 31 bits carry the skip length.
+            // The sequence number is the writer's REAL next seq — burning
+            // it here is intentional so the reader's optional replay-guard
+            // sees a contiguous sequence even across overcommits.
             MessageHeader lSkip{};
-            lSkip.m_uPayloadBytes = aPayloadLen;   // tells reader how far to skip
-            lSkip.m_uSequenceNo   = SKIP_SENTINEL_SEQ;
+            lSkip.m_uPayloadBytes = aPayloadLen | SKIP_PAYLOAD_FLAG;
+            lSkip.m_uSequenceNo   = m_uNextSeq++;
             ringCopyIn(lUClaimStart, &lSkip, static_cast<U32>(sizeof(MessageHeader)));
 
             // Commit the SKIP record (ordered with any prior producers)
@@ -353,8 +382,12 @@ Result<U32> RingBuffer::read(void* aBuf, U32 aBufLen) noexcept
         MessageHeader lHeader{};
         ringCopyOut(lUReadIdx, &lHeader, static_cast<U32>(sizeof(MessageHeader)));
 
+        // Decode SKIP flag + real payload length from header.
+        const bool lBIsSkip      = fnIsSkipRecord(lHeader.m_uPayloadBytes);
+        const U32  lUPayloadLen  = fnPayloadLen(lHeader.m_uPayloadBytes);
+
         const U64 lUMsgTotal = static_cast<U64>(sizeof(MessageHeader))
-                             + static_cast<U64>(lHeader.m_uPayloadBytes);
+                             + static_cast<U64>(lUPayloadLen);
 
         if (lUAvail < lUMsgTotal)
         {
@@ -366,18 +399,18 @@ Result<U32> RingBuffer::read(void* aBuf, U32 aBufLen) noexcept
         }
 
         // Silently consume SKIP sentinel records
-        if (lHeader.m_uSequenceNo == SKIP_SENTINEL_SEQ)
+        if (lBIsSkip)
         {
             m_pControl->m_read.m_uReadIndex
                 .store(lUReadIdx + lUMsgTotal, std::memory_order_release);
             ASTRA_LOG_TRACE(LOG_TAG,
                 "read: consumed SKIP sentinel (%u bytes) (channel %u)",
-                lHeader.m_uPayloadBytes,
+                lUPayloadLen,
                 m_pControl->m_meta.m_uChannelId);
             continue;  // re-check for the next real message
         }
 
-        if (aBufLen < lHeader.m_uPayloadBytes)
+        if (aBufLen < lUPayloadLen)
         {
             return std::unexpected(makeError(
                 ErrorCode::RESOURCE_EXHAUSTED,
@@ -388,7 +421,7 @@ Result<U32> RingBuffer::read(void* aBuf, U32 aBufLen) noexcept
 
         ringCopyOut(lUReadIdx + static_cast<U64>(sizeof(MessageHeader)),
                     aBuf,
-                    lHeader.m_uPayloadBytes);
+                    lUPayloadLen);
 
         m_pControl->m_read.m_uReadIndex
             .store(lUReadIdx + lUMsgTotal, std::memory_order_release);
@@ -396,10 +429,10 @@ Result<U32> RingBuffer::read(void* aBuf, U32 aBufLen) noexcept
         ASTRA_LOG_TRACE(LOG_TAG,
             "read: seq=%u payload=%u bytes (channel %u)",
             lHeader.m_uSequenceNo,
-            lHeader.m_uPayloadBytes,
+            lUPayloadLen,
             m_pControl->m_meta.m_uChannelId);
 
-        return lHeader.m_uPayloadBytes;
+        return lUPayloadLen;
     }
 }
 
@@ -428,15 +461,15 @@ Result<U32> RingBuffer::peekNextSize() const noexcept
         MessageHeader lHeader{};
         ringCopyOut(lUScanIdx, &lHeader, static_cast<U32>(sizeof(MessageHeader)));
 
-        if (lHeader.m_uSequenceNo == SKIP_SENTINEL_SEQ)
+        if (fnIsSkipRecord(lHeader.m_uPayloadBytes))
         {
             // Skip over this sentinel and look at the next record
             lUScanIdx += static_cast<U64>(sizeof(MessageHeader))
-                       + static_cast<U64>(lHeader.m_uPayloadBytes);
+                       + static_cast<U64>(fnPayloadLen(lHeader.m_uPayloadBytes));
             continue;
         }
 
-        return lHeader.m_uPayloadBytes;
+        return fnPayloadLen(lHeader.m_uPayloadBytes);
     }
 }
 

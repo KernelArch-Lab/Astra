@@ -77,6 +77,30 @@ struct CapabilityGate
     {
         return m_pManager != nullptr && m_token.isValid();
     }
+
+    // ------------------------------------------------------------
+    // Snapshot semantics + rebind (audit finding C6, 2026-05-31).
+    //
+    // CapabilityGate stores a value-copy of the token at bind time.
+    // If the underlying capability is revoked AND re-issued (e.g. via
+    // a fresh CapabilityManager::create after a revoke cascade), the
+    // gate's local copy still carries the OLD UID — every subsequent
+    // write/read will return PERMISSION_DENIED because the manager's
+    // pool slot no longer matches the cached UID.
+    //
+    // Callers that intend to follow a capability through a revoke +
+    // re-issue cycle MUST call rebind() with the fresh token. There
+    // is no "rebind" notification from the manager — the cap holder
+    // is responsible for the coupling.
+    //
+    // Replacing m_token directly works too; rebind() exists to make
+    // the intent explicit in call sites and to encapsulate any future
+    // versioning checks we may add.
+    // ------------------------------------------------------------
+    void rebind(const astra::core::CapabilityToken& aFresh) noexcept
+    {
+        m_token = aFresh;
+    }
 };
 
 // ---------------------------------------------------------------------------
@@ -170,6 +194,25 @@ public:
     //   PERMISSION_DENIED if the gate is unbound, the token is revoked,
     //                     or the token does not carry IPC_SEND/RECV.
     //   anything write()/read() can return otherwise.
+    //
+    // CONCURRENCY SEMANTICS — "best-effort revocation" (audit C7, 2026-05-31)
+    //
+    // There is a TOCTOU window between validate() and the underlying
+    // write()/read(). A token revoked AFTER validate has returned true
+    // but BEFORE the ring claim/commit completes WILL allow the
+    // already-validated operation to land. The paper's correctness
+    // claim must therefore be stated as "best-effort revocation —
+    // after revoke completes, no producer that has not yet successfully
+    // validated will succeed" — NOT "no message after revoke ever
+    // reaches the consumer". The Sprint 9 concurrency test
+    // (test_sprint5_gate_concurrency.cpp) catches steady-state
+    // post-revoke publishes; in-flight messages are explicitly out
+    // of scope.
+    //
+    // To narrow the window, callers can re-validate inside the writer
+    // loop after each successful write — at the cost of one extra
+    // validate() per message (~80ns p99 with Sprint 4's O(1) path).
+    // readWaitGated already does this between futex wakes.
     // -----------------------------------------------------------------------
     [[nodiscard]] Result<void> writeGated(
         const CapabilityGate& aGate,

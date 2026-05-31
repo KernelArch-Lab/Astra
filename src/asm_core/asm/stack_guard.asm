@@ -4,20 +4,24 @@
 ;
 ; uint64_t asm_stack_canary_init(void);
 ;
-; Mint a 64-bit per-thread stack canary. RDRAND first; if every retry
-; fails (genuinely rare — usually means the RNG is on fire), fall
-; back to RDTSC mixed across both halves so the result is at least
-; non-zero and not predictable across reboots.
+; Mint a 64-bit per-thread stack canary using RDRAND with 10 retries
+; (the conventional kernel-level retry budget for RDRAND).
+;
+; On total RDRAND exhaustion the function returns 0. Per the M-21
+; ABI contract, a zero canary signals "RNG is unusable" — the C++
+; self-test (asm_core_stubs.cpp) MUST refuse to start the runtime
+; in that case. Returning a predictable RDTSC-derived value, as the
+; previous implementation did, silently degraded the entropy from
+; 2^64 to a small window around the boot time (audit finding C8,
+; 2026-05-31). The fallback was advertised as "Astra refuses to
+; start when we hit it" but the detection mechanism did not exist;
+; this hard-zero behaviour is what makes the advertised refusal real.
 ;
 ; System V AMD64:
 ;   no parameters
 ;   returns: rax (uint64_t)
-;
-; The fallback is intentional. A zero canary would be silently
-; ignored by stack-protector logic and is far worse than a slightly
-; predictable one. Astra's runtime self-test refuses to start when
-; we hit the fallback, but in case it ever runs in a degraded
-; environment the function still returns something usable.
+;     non-zero  → fresh RDRAND output
+;     zero      → RDRAND exhausted; CALLER MUST FAIL CLOSED
 ; ============================================================================
 
 default rel
@@ -33,11 +37,9 @@ asm_stack_canary_init:
     dec     ecx
     jnz     .retry
 
-    ; RDRAND exhausted. Fall back to RDTSC.
-    rdtsc                         ; edx:eax = 64-bit timestamp counter
-    shl     rdx, 32
-    or      rax, rdx              ; rax = (edx << 32) | eax
-
+    ; RDRAND exhausted. Fail closed: return 0 so the C++ self-test
+    ; (which checks canary != 0) rejects runtime startup.
+    xor     eax, eax              ; rax = 0
 .done:
     ret
 
