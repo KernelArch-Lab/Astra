@@ -78,18 +78,24 @@ int main()
     std::vector<std::vector<CapabilityToken>> tree(kRoots);
     for (int r = 0; r < kRoots; ++r)
     {
+        const auto ur = static_cast<std::size_t>(r);
         roots.push_back(
             mgr.create(Permission::IPC_SEND, static_cast<astra::U64>(r)).value());
         for (int c = 0; c < kPerRoot; ++c)
-            tree[r].push_back(
-                mgr.derive(roots[r], Permission::IPC_SEND,
+            tree[ur].push_back(
+                mgr.derive(roots[ur], Permission::IPC_SEND,
                            static_cast<astra::U64>(r * 100 + c)).value());
     }
 
     // Per-token last-observed-true timestamp.
     std::vector<AtomicTp> lastTrue(kRoots * kPerRoot);
 
-    auto idxFor = [&](int r, int c) { return r * kPerRoot + c; };
+    // Returns size_t so subscript callers don't trip -Wsign-conversion.
+    auto idxFor = [&](int r, int c) -> std::size_t {
+        return static_cast<std::size_t>(r) *
+               static_cast<std::size_t>(kPerRoot) +
+               static_cast<std::size_t>(c);
+    };
 
     std::atomic<bool> stop{false};
     std::vector<std::thread> producers;
@@ -102,7 +108,9 @@ int main()
             {
                 int r = std::uniform_int_distribution<int>(0, kRoots-1)(rng);
                 int c = std::uniform_int_distribution<int>(0, kPerRoot-1)(rng);
-                if (mgr.validate(tree[r][c], Permission::IPC_SEND))
+                if (mgr.validate(tree[static_cast<std::size_t>(r)]
+                                     [static_cast<std::size_t>(c)],
+                                 Permission::IPC_SEND))
                     store(lastTrue[idxFor(r,c)], Clock::now());
             }
         });
@@ -114,11 +122,12 @@ int main()
         std::mt19937_64 rng{0xC0FFEE};
         for (int r = 0; r < kRoots; ++r)
         {
+            const auto ur = static_cast<std::size_t>(r);
             std::this_thread::sleep_for(
                 std::chrono::milliseconds(
                     std::uniform_int_distribution<int>(200, 600)(rng)));
             store(tRoot[r], Clock::now());
-            (void)mgr.revoke(roots[r]);
+            (void)mgr.revoke(roots[ur]);
         }
     });
 

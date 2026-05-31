@@ -108,7 +108,12 @@ static Stats fnSummarise(std::vector<uint64_t>& v, double fTscPerNs)
     if (v.empty()) return s;
     std::sort(v.begin(), v.end());
     auto fnAt = [&](double pct) {
-        size_t i = std::min<size_t>(static_cast<size_t>(pct * v.size()), v.size() - 1);
+        // Explicit double-cast on v.size() — Clang 21 / GCC 15 flag the
+        // implicit size_t → double conversion as potentially lossy under
+        // -Werror=conversion.
+        size_t i = std::min<size_t>(
+            static_cast<size_t>(pct * static_cast<double>(v.size())),
+            v.size() - 1);
         return static_cast<double>(v[i]) / fTscPerNs;
     };
     long double sum = 0;

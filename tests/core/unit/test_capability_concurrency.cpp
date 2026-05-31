@@ -76,7 +76,11 @@ std::atomic<int> g_failures{0};
 void worker(int id, CapabilityManager* mgr, RevokedSet* revoked,
             std::atomic<bool>* stop)
 {
-    std::mt19937_64 rng{static_cast<uint64_t>(id) * 0x9E3779B97F4A7C15ULL};
+    // Knuth's golden-ratio multiplier as uint64_t (not unsigned-long-long).
+    // On LP64 those are different types of the same width and the
+    // multiplication's implicit conversion trips -Werror=sign-conversion.
+    std::mt19937_64 rng{static_cast<uint64_t>(id) *
+                        static_cast<uint64_t>(0x9E3779B97F4A7C15ULL)};
     std::uniform_int_distribution<int> opPick(0, 99);
     std::vector<CapabilityToken>       myToks;
 

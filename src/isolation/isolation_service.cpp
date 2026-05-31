@@ -162,10 +162,13 @@ Status IsolationService::onStart()
 // ============================================================================
 Status IsolationService::onStop()
 {
-    // Unregister every hook this module installed (currently the single
-    // POST_FORK isolation hook). unregisterByModule returns the count
-    // removed; we don't fail onStop() if it's already gone.
-    m_runtime.processes().hooks().unregisterByModule(ModuleId::ISOLATION);
+    // Unregister every hook this module installed. The HookRegistry API
+    // takes (HookPoint, ModuleId) — there is no "across all points"
+    // variant — so we walk the points we know we used. Currently that's
+    // just POST_FORK (audit fix O1); add other points here if/when
+    // IsolationService registers anywhere else.
+    m_runtime.processes().hooks().unregisterByModule(
+        core::HookPoint::POST_FORK, ModuleId::ISOLATION);
 
     // Also clear the legacy single-slot hook, just in case some other
     // path populated it. Defence-in-depth — a no-op when already null.
