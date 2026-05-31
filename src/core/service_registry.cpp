@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <deque>   // FIFO worklist in topologicalSort()
 #include <cstring>
 #include <new>
 #include <thread>
@@ -479,6 +480,14 @@ Status ServiceRegistry::startAll()
 
     const std::vector<U32>& lVStartOrder = lSortResult.value();
 
+    // Track failures so startAll() can return an aggregate error
+    // (audit finding O4, 2026-05-31). Previously startAll always
+    // returned ok() and only logged failures — a production deploy
+    // with a failing IsolationService would "start" with no isolation
+    // and main.cpp had no way to detect the silent degradation.
+    U32         lUFailedCount = 0;
+    std::string lFailedNames;
+
     // Start services in topological order
     for (U32 lUSlotIdx : lVStartOrder)
     {
@@ -506,7 +515,6 @@ Status ServiceRegistry::startAll()
         if (!lInitStatus.has_value())
         {
             lSlot.m_eState.store(ServiceState::FAILED, std::memory_order_release);
-            std::string lSzInitError(lInitStatus.error().message());
             ASTRA_LOG_ERROR(LOG_TAG, "  Service '%s' init FAILED: %s",
                            lSlot.m_handle.m_szName.c_str(),
                            lInitStatus.error().message().data());
@@ -515,14 +523,19 @@ Status ServiceRegistry::startAll()
             {
                 m_fnServiceEvent(lSlot.m_handle.m_uId, lSlot.m_handle.m_szName, "failed");
             }
-            continue;  // Continue with next service despite failure
+
+            // Track for the aggregate error returned from startAll()
+            ++lUFailedCount;
+            if (!lFailedNames.empty()) lFailedNames += ", ";
+            lFailedNames += lSlot.m_handle.m_szName;
+
+            continue;  // Try remaining services so we get a complete failure picture
         }
 
         Status lStartStatus = lSlot.m_pService->onStart();
         if (!lStartStatus.has_value())
         {
             lSlot.m_eState.store(ServiceState::FAILED, std::memory_order_release);
-            std::string lSzStartError(lStartStatus.error().message());
             ASTRA_LOG_ERROR(LOG_TAG, "  Service '%s' start FAILED: %s",
                            lSlot.m_handle.m_szName.c_str(),
                            lStartStatus.error().message().data());
@@ -531,7 +544,12 @@ Status ServiceRegistry::startAll()
             {
                 m_fnServiceEvent(lSlot.m_handle.m_uId, lSlot.m_handle.m_szName, "failed");
             }
-            continue;  // Continue with next service despite failure
+
+            ++lUFailedCount;
+            if (!lFailedNames.empty()) lFailedNames += ", ";
+            lFailedNames += lSlot.m_handle.m_szName;
+
+            continue;
         }
 
         lSlot.m_eState.store(ServiceState::RUNNING, std::memory_order_release);
@@ -542,6 +560,25 @@ Status ServiceRegistry::startAll()
         {
             m_fnServiceEvent(lSlot.m_handle.m_uId, lSlot.m_handle.m_szName, "started");
         }
+    }
+
+    if (lUFailedCount > 0)
+    {
+        // Surface the aggregate failure to the caller (typically Runtime::run).
+        // The caller can decide whether to abort, run in degraded mode, or
+        // restart the failing services. Silent ok() was the prior behaviour
+        // and is exactly the failure mode that lets a security runtime
+        // start with no isolation. (audit finding O4)
+        std::string lSzMsg = "ServiceRegistry::startAll: "
+                           + std::to_string(lUFailedCount)
+                           + " service(s) failed to start: "
+                           + lFailedNames;
+        ASTRA_LOG_SEC_ALERT(LOG_TAG, "%s", lSzMsg.c_str());
+        return astra::unexpected(makeError(
+            ErrorCode::INTERNAL_ERROR,
+            ErrorCategory::CORE,
+            lSzMsg
+        ));
     }
 
     return {};
@@ -780,31 +817,41 @@ Result<std::vector<U32>> ServiceRegistry::topologicalSort() const
         }
     }
 
-    // Kahn's algorithm: process nodes with 0 in-degree
-    std::vector<U32> lVQueue;
+    // Kahn's algorithm: process nodes with 0 in-degree.
+    //
+    // FIFO queue (std::deque) — NOT LIFO (audit finding O5, 2026-05-31).
+    // The previous code used `vector::back()` + `pop_back()`, which made
+    // service start order LIFO over slot index. For services with no
+    // declared dependencies this meant the LAST-registered service
+    // started FIRST — surprising and non-deterministic for any code that
+    // assumed registration order. With a proper FIFO + slot-index seed,
+    // start order is deterministic: services with no deps go in slot
+    // (≈registration) order; downstream services follow when their deps
+    // resolve.
+    std::deque<U32> lDQueue;
     for (U32 lUIdx = 0; lUIdx < m_uMaxServices; ++lUIdx)
     {
         if (m_pSlots[lUIdx].m_eState.load(std::memory_order_acquire) != ServiceState::UNREGISTERED &&
             lVInDegree[lUIdx] == 0)
         {
-            lVQueue.push_back(lUIdx);
+            lDQueue.push_back(lUIdx);
         }
     }
 
-    while (!lVQueue.empty())
+    while (!lDQueue.empty())
     {
-        // Dequeue a service
-        U32 lUIdx = lVQueue.back();
-        lVQueue.pop_back();
+        // Dequeue the OLDEST element — FIFO.
+        U32 lUIdx = lDQueue.front();
+        lDQueue.pop_front();
         lVResult.push_back(lUIdx);
 
-        // For each dependent, decrement in-degree
+        // For each dependent, decrement in-degree.
         for (U32 lUDepIdx : lVAdjacency[lUIdx])
         {
             --lVInDegree[lUDepIdx];
             if (lVInDegree[lUDepIdx] == 0)
             {
-                lVQueue.push_back(lUDepIdx);
+                lDQueue.push_back(lUDepIdx);
             }
         }
     }

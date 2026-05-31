@@ -180,8 +180,35 @@ Status Runtime::run()
 
     ASTRA_LOG_INFO(LOG_TAG, "Entering main event loop...");
 
-    // Start all registered services
-    m_serviceRegistry.startAll();
+    // O11 (audit, 2026-05-31): check shutdown BEFORE startAll().
+    // A SIGINT delivered between init() and run() would otherwise
+    // result in startAll() being skipped AND the runtime appearing
+    // to "exit cleanly" without having started anything. Surface that
+    // case as an explicit precondition failure so main.cpp can react.
+    if (isShutdownRequested())
+    {
+        ASTRA_LOG_WARN(LOG_TAG,
+            "Shutdown was requested before run() entered the loop — "
+            "no services started; exiting without doing work.");
+        return astra::unexpected(makeError(
+            ErrorCode::PRECONDITION_FAILED,
+            ErrorCategory::CORE,
+            "Runtime::run: shutdown requested before service start"
+        ));
+    }
+
+    // Start all registered services. startAll now surfaces aggregate
+    // failures (audit finding O4) — we abort run() if any service
+    // failed to start rather than entering the main loop in a silently
+    // degraded state. The caller (main) is responsible for the next
+    // step: shutdown(), retry, or whatever its policy demands.
+    Status lStartSt = m_serviceRegistry.startAll();
+    if (!lStartSt.has_value())
+    {
+        ASTRA_LOG_ERROR(LOG_TAG,
+            "Runtime::run: startAll() failed — refusing to enter main loop");
+        return lStartSt;
+    }
 
     while (!isShutdownRequested())
     {

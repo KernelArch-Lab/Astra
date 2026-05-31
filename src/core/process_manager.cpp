@@ -405,14 +405,42 @@ Result<ProcessId> ProcessManager::spawn(const ProcessConfig& aConfig)
                        static_cast<unsigned long long>(lUPid),
                        lIChildPid);
 
-        // Execute POST_SPAWN hooks in parent (recording, profiling, etc.)
+        // Execute POST_SPAWN hooks in parent (recording, profiling, etc.).
+        //
+        // POST_SPAWN failure semantics (audit finding O12, 2026-05-31):
+        //   The child is already running by this point. Hook failures here
+        //   typically come from M-05 (replay/recording open) or M-17
+        //   (profiler attach). Silently logging-and-returning-ok is the
+        //   exact failure mode that lets a security-sensitive recording
+        //   silently stop. We now kill the child and return an error to
+        //   the caller, so the operator sees the failure rather than
+        //   discovering it later when forensic data is missing.
+        //
+        //   Rationale: a process running without its required POST_SPAWN
+        //   instrumentation is by policy not a process Astra is willing
+        //   to host. If a hook is OK with optional behaviour, it should
+        //   return Status::ok itself even on internal best-effort failure
+        //   — the hook contract is "return error iff this process should
+        //   not run".
         Status lPostSpawnStatus = m_hookRegistry.execute(HookPoint::POST_SPAWN, lUPid, aConfig.m_isolationProfile);
         if (!lPostSpawnStatus.has_value())
         {
-            ASTRA_LOG_WARN(LOG_TAG, "POST_SPAWN hook failed for process [%llu] (process already running)",
-                           static_cast<unsigned long long>(lUPid));
-            // Note: we don't kill the process here because it's already running.
-            // The hook failure is logged but doesn't abort the spawn.
+            ASTRA_LOG_SEC_ALERT(LOG_TAG,
+                "POST_SPAWN hook failed for process [%llu] — killing child %d",
+                static_cast<unsigned long long>(lUPid),
+                lIChildPid);
+
+            // Best-effort kill of the child. Don't propagate kill errors —
+            // the underlying POST_SPAWN failure is the one that matters.
+            ::kill(lIChildPid, SIGKILL);
+
+            // Mark our descriptor as CRASHED for accounting; reapChildren
+            // will catch the SIGKILL and finish the bookkeeping.
+            acquireSpinlock();
+            lDesc.m_eState.store(ProcessState::CRASHED, std::memory_order_release);
+            releaseSpinlock();
+
+            return astra::unexpected(lPostSpawnStatus.error());
         }
 
         // Publish event
