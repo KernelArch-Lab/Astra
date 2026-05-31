@@ -84,6 +84,7 @@ ASTRA_DEFINE_LOGGER(g_logNamespaceMgr);
 #include <cerrno>           // errno
 #include <cstring>          // strerror()
 #include <string>           // std::string, std::to_string()
+#include <stdexcept>
 
 namespace astra
 {
@@ -227,6 +228,33 @@ Status NamespaceManager::setup(const SandboxProfile& aProfile,
             return lStFs;
         }
         // m_eState == FS_PIVOTED
+    }
+
+    // ----------------------------------------------------------------
+    // Sprint 3: Apply seccomp filter as the final isolation step.
+    //
+    // Must come AFTER all namespace setup because our own setup code
+    // calls syscalls (unshare, open, write, mount, pivot_root) that
+    // are NOT on the PARANOID allowlist.
+    //
+    // Error handling: apply() throws std::runtime_error on failure.
+    // We catch it here at the public API boundary and convert to Status.
+    // ----------------------------------------------------------------
+    if (aProfile.m_eSeccompMode != SeccompMode::DISABLED)
+    {
+        try
+        {
+            m_seccompFilter.apply();
+        }
+        catch (const std::runtime_error& aEx)
+        {
+            rollback();
+            return std::unexpected(makeError(
+                ErrorCode::NAMESPACE_SETUP_FAILED,
+                ErrorCategory::ISOLATION,
+                std::string("seccomp filter failed: ") + aEx.what()
+            ));
+        }
     }
 
     m_eState.store(NamespaceState::ACTIVE, std::memory_order_release);

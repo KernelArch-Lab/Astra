@@ -7,6 +7,7 @@ add_library(astra_isolation STATIC
     profile_engine.cpp
     namespace_manager.cpp
     isolation_service.cpp
+    seccomp_filter.cpp
 )
 
 target_include_directories(astra_isolation
