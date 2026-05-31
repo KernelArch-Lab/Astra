@@ -151,13 +151,33 @@ endif()
 #
 # IMPORTANT: gate flags to C / CXX only — NASM (ASM_NASM language) has a
 # completely different CLI. In particular it interprets `-f<x>` as an
-# output-format directive, so passing `-fstack-protector-strong` causes
-# `nasm: fatal: unrecognised output format 'stack-protector-strong'`.
-# (Caught on first Fedora build, 2026-05-31.)
+# output-format directive, so passing `-fstack-protector-strong` or
+# `-fPIE` causes:
+#
+#   nasm: fatal: unrecognised output format 'stack-protector-strong'
+#   nasm: fatal: unrecognised output format 'PIE'
+#
+# We wrap EACH flag in its own $<COMPILE_LANGUAGE:C,CXX:...> genex
+# instead of wrapping the whole list, because CMake's generator-
+# expression parser glues the closing `>` onto the LAST element of a
+# semicolon-separated list when the list is the body of a single genex:
+#
+#   add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:${LIST}>)
+#       ^ expands to   -flag1 -flag2 ... -lastFlag>
+#
+# yielding `-ftrapv>` and `-Wold-style-cast>` errors from g++.
+# Caught on second Fedora build, 2026-05-31.
 # --------------------------------------------------------------------------
-add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:${ASTRA_WARNING_FLAGS}>)
-add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:${ASTRA_HARDENING_FLAGS}>)
-add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:${ASTRA_SANITIZER_FLAGS}>)
+foreach(_astra_flag IN LISTS ASTRA_WARNING_FLAGS ASTRA_HARDENING_FLAGS)
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:${_astra_flag}>")
+endforeach()
+foreach(_astra_flag IN LISTS ASTRA_SANITIZER_FLAGS)
+    if(_astra_flag)
+        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:${_astra_flag}>")
+    endif()
+endforeach()
+unset(_astra_flag)
+
 add_link_options(${ASTRA_HARDENING_LINKER_FLAGS})
 add_link_options(${ASTRA_SANITIZER_FLAGS})
 
