@@ -1,0 +1,94 @@
+\section{Discussion and limitations}
+\label{sec:disc}
+
+\subsection{The C++ stance}
+\label{sec:disc:cpp}
+
+\sysname is C++ rather than Rust. We discuss the choice openly because
+ATC reviewers will. The pitch is not "C++ is fine"---we have no
+illusions about its memory-safety story---but rather "capability
+discipline can be retrofitted onto an unsafe-language ecosystem in
+ways the security literature underrepresents". \sysname demonstrates
+that a 4096-token capability layer with constant-time
+mediation can be added on top of a C++ runtime without the
+language being a fundamental obstacle. This is a different bet from
+Tock~\cite{tock}, Theseus~\cite{theseus}, and Redox, all of which take
+the position that the language matters and choose Rust.
+
+The bet is testable: the CBMC monotonicity proof, the property test
+oracle, the libFuzzer harness, and the constant-time NASM primitives
+together cover the surface area where C++'s unsafety is most likely
+to manifest as a security bug. We disclose the residual risk---a
+memory-corruption attack inside the runtime's own pages would
+compromise every token---and frame Paper 1's contribution as
+\textit{the upper-half capability story}, not the lower-half
+safety story.
+
+A subset port of the hot path to Rust is on our roadmap conditional
+on Paper 1 reviewers flagging the language choice as the primary
+weakness.
+
+\subsection{The Aeron gap}
+\label{sec:disc:aeron}
+
+Aeron's published 250\,ns RTT is the tightest single-host IPC number
+in production. Our \aeronGapPercent\% gap is the headline number
+we want to defend (down) and the headline number reviewers will
+attack (up). The gap decomposes as follows:
+
+\begin{itemize}
+\itemsep0pt
+\item Two \texttt{validate()} calls per round trip ($\sim$\gateOverheadP99\,ns
+total at p99). This is irreducible without either dropping security
+or moving to a less constant-time comparator.
+\item C++23 range-checked vector and \texttt{Result<T>} unwrap on the
+hot path. Aeron's published number uses a slimmer, more C-like API.
+A future port of the hot path to a no-std-library style would close
+some of this gap; we have not done it.
+\item Memory-fence policy. Aeron's ring uses release-acquire on
+write\_index only; we use release-acquire on both write\_index and
+write\_claim\_index. This is a correctness requirement of the
+two-phase MPSC claim/commit but does cost cycles relative to the
+SPSC-only Aeron arrangement.
+\end{itemize}
+
+We do not expect to beat Aeron on raw RTT---the design template is
+shared---but we expect the gap to shrink with a hot-path API
+streamline.
+
+\subsection{HongMeng-overlap framing}
+\label{sec:disc:hongmeng}
+
+HongMeng (OSDI '24) is the closest competitor on the
+\textit{capability + Linux + IPC fastpath} triple. The honest framing
+is that HongMeng owns the kernel-level cell, while \sysname owns
+the userspace-runtime cell. HongMeng's authors describe retreating
+from chain-revocable capabilities to "address tokens" because the
+revocation cost was hurting performance; we read this as evidence
+that the (in-kernel, full-revocation) point in the design space is
+expensive, not as evidence that revocation itself is unaffordable.
+\sysname's userspace position pays a different cost (the slot lookup
+on every message) but recovers full chain revocation at $O(1)$.
+
+\subsection{Single-machine scope}
+\label{sec:disc:scope}
+
+Paper 1 is single-host. The cross-host story---attestation-backed
+capability delegation, remote token transfer, capability tokens as
+attestation artefacts in TEEs---is the subject of follow-up work
+(M-23 ConfCompute) which we deliberately exclude here to keep the
+contribution scoped. Reviewers who want to see TEE binding will find
+it in the published architecture overview~\cite{astra-confcompute}
+but not in this paper's measurement.
+
+\subsection{Macrobench}
+\label{sec:disc:macro}
+
+We do not include a NGINX / Redis / SQLite macrobench in the
+evaluation. The reason is space: at 12 pages, the head-to-head against
+five reference transports plus the $O(1)$ confirmation plus
+revocation latency plus perf counters fills the budget. A macrobench
+would shift the headline from "the gate is cheap" to "the gate is
+cheap on this specific application," which is a weaker claim. The
+artefact ships the harness scaffolding; we will publish the macrobench
+numbers in the artefact-evaluation appendix.

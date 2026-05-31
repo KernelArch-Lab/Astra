@@ -1,0 +1,84 @@
+\section{Threat model}
+\label{sec:threat}
+
+\sysname operates above the Linux kernel as a userspace runtime
+shared by mutually-distrusting components within a single host. We
+identify the trust boundary explicitly because Paper 1's claims live
+or die by where it is drawn.
+
+\para{Trusted}
+\begin{itemize}
+\itemsep0pt
+\item The Linux kernel and its memory-protection guarantees. We rely
+on \texttt{mmap(MAP\_SHARED)} backed by \texttt{memfd\_create}, on
+\texttt{seccomp-BPF} for syscall filtering, and on
+\texttt{CLONE\_NEWUSER}/\texttt{CLONE\_NEWNS} for namespace isolation.
+\item The \sysname runtime's own pages, including the
+\texttt{CapabilityManager} pool of token slots, the
+\texttt{ChannelControlBlock}s of any IPC channels that have been
+established, and the M-21 constant-time NASM primitives.
+\item RDRAND as a uniformly-random source. We use 96 bits of RDRAND per
+token; a compromised RDRAND would shrink the forgery space.
+\end{itemize}
+
+\para{Untrusted}
+\begin{itemize}
+\itemsep0pt
+\item Any process holding a \captoken. The bits of the token may be
+arbitrary---we assume the holder may forge, mutate, replay, or simply
+guess a token's 128-bit identifier.
+\item Any byte that crosses an IPC channel. The runtime must not be
+induced to take any state-altering action by parsing untrusted bytes;
+in particular, the IPC framing itself (header parsing, sequence
+numbers) must be safe under arbitrary input.
+\item The peer endpoint of a channel. A capability-bearing producer
+may misbehave (publish wrong-shaped messages, withhold messages,
+flood). The capability gate at the consumer protects the consumer
+from the producer; the producer's gate protects \sysname from the
+producer attempting to publish past its revocation.
+\end{itemize}
+
+\para{In scope: forgery, replay, use-after-revoke}
+The capability check must reject:
+\textit{(a)} a token whose 128-bit identifier is not currently active
+in the pool (forgery);
+\textit{(b)} a token whose 128-bit identifier was once active but has
+since been revoked, including via cascading revocation of an ancestor
+(use-after-revoke);
+\textit{(c)} a token that bears the correct identifier but whose
+permission bitmask does not include the requested operation (privilege
+escalation).
+
+The slot-indexed validate path (\Cref{sec:design:fastpath}) keeps the
+forgery space at $2^{96}$: the slot index in the high 32 bits is
+\textit{treated as a hint}, not as a credential, because the
+constant-time compare on the full 128 bits still has to match.
+
+\para{In scope: side-channels in the gate}
+The capability comparison must not leak which byte differs first, and
+the runtime must not take observably different paths based on a
+token's contents past the binary accept/reject decision. We use the
+M-21 \texttt{asm\_ct\_compare} primitive for the 128-bit identifier
+match; it is constant-time and barrier-balanced. The slot index
+\textit{is} consulted before the constant-time compare, but only to
+choose a pool offset---an attacker who controls the slot index cannot
+induce different cache behaviour across pool sizes (see
+\Cref{sec:eval:perfctrs}).
+
+\para{Out of scope: rowhammer-class faults, full kernel TCB bypass}
+We do not defend against rowhammer-induced corruption of the token
+pool, against speculative execution that pierces the kernel TCB
+(those threats are HongMeng's territory~\cite{hongmeng}), or against
+an attacker who can already write to \sysname's process memory.
+\sysname assumes Linux's process isolation works.
+
+\para{Out of scope: cross-host capability delegation}
+Paper 1 is single-host. Cross-host delegation, attestation handshakes,
+and remote-capability transfer are the subject of follow-up work
+(M-23 ConfCompute, in preparation~\cite{astra-confcompute}).
+
+\para{Out of scope: hardware capability enforcement}
+We do not assume CHERI, Morello, MTE, or LAM. CAP-VMs~\cite{capvms}
+operates in the same conceptual layer but requires CHERI hardware;
+\sysname's contribution is making the same conceptual layer available
+on commodity x86-64 / aarch64.

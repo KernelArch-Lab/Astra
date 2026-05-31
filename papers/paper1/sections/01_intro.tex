@@ -1,0 +1,109 @@
+\section{Introduction}
+\label{sec:intro}
+
+The 2020s have produced an unusual confluence of demands on userspace
+runtimes. Confidential-compute platforms expect every cross-component
+call to be brokered by a runtime with a defensible authorisation
+story~\cite{tdx2024,sevsnp,arm-cca}. AI agents that drive web browsers,
+shells, and developer toolchains in the field today route every
+tool-call through some flavour of \texttt{bubblewrap},
+container, or microVM~\cite{anthropic-cu, openai-agents, devin}, none
+of which expose a capability layer above the syscall boundary.
+NIST AI~600-1 and the EU AI Act both push toward
+\textit{verifiable mediation} of agent actions~\cite{nist-ai-600-1,
+euaiact15}, an explicit demand that runtime authorisation be
+both fast and unforgeable.
+
+The runtimes that currently come closest divide along two axes (\Cref{tab:landscape}):
+\textbf{kernel-resident vs.\ userspace}, and \textbf{capability-mediated vs.\
+not}. seL4~\cite{klein2009sel4} owns the kernel-capability cell; it offers
+the strongest assurances but requires a clean-slate kernel and is unsuitable
+for layering on Linux. gVisor~\cite{gvisor} and Firecracker~\cite{firecracker}
+own the userspace-mediation cell, but neither has a capability model;
+they enforce isolation through syscall interception or microVM
+separation. CAP-VMs~\cite{capvms} sit in the userspace-capability cell
+but require CHERI/Morello hardware. The cell that is empty---and that
+the agent-runtime requirement is pushing into existence---is
+\textit{userspace, capability-mediated, no special hardware, on stock
+Linux}.
+
+\sysnamefull is our entry into that cell. It is a C++ runtime that
+gates every zero-copy memfd IPC channel on stock Linux through
+unforgeable 128-bit \captokens with epoch-based cascading revocation,
+achieving sub-microsecond validated message delivery without kernel
+modifications.
+
+\para{The empirical question}
+A capability gate that costs hundreds of nanoseconds per message turns
+"every message validates" into a non-starter; the runtime would lose
+its IPC argument before the security one. The question this paper
+answers is therefore not "can we do it?" but "can the gate sit on
+the IPC fastpath without losing the latency floor that motivates
+zero-copy IPC in the first place?"
+
+We answer this with a head-to-head measurement against five reference
+transports---pipe(2), socketpair, io_uring, Aeron, eRPC---in the same
+TSC domain on the same machine.
+
+\para{Why this is non-obvious}
+Two design choices are easy to get wrong. First, the natural
+implementation of capability validation is a hash-table lookup, which
+costs at least one indirection plus a cache miss; on a sub-microsecond
+budget that is most of the budget gone. Second, the natural threat
+model includes \textit{forged capability identifiers}, which closes off
+the obvious optimisation of trusting the token to encode its own pool
+location.
+
+Our central trick is to trust the token \emph{partially}: the high
+32\,bits of the 128-bit identifier carry the pool slot index, while the
+remaining 96\,bits are RDRAND-sourced randomness. The slot index is
+treated as a hint, not a credential---a constant-time compare on the
+full 128 bits still has to match before the token is accepted. The
+forgery space stays at $2^{96}$, but the lookup is one shift plus one
+load.
+
+\para{Contributions}
+\begin{enumerate}
+\itemsep0pt
+\item The first software-only Linux-userspace realisation of a Redell /
+EROS / Cornucopia\,Reloaded\,\cite{redell74,shapiro1999eros,
+cornucopia-reloaded}-class capability revocation regime, gating a
+wait-free MPSC IPC fastpath in shared mmap memory
+(\Cref{sec:design},~\Cref{sec:impl}).
+\item The slot-indexed validate path that makes the gate affordable
+on the IPC fastpath without losing the $2^{96}$ forgery space
+(\Cref{sec:design:fastpath}).
+\item A reproducible, same-TSC-domain head-to-head against pipe(2),
+socketpair, io_uring, Aeron, and eRPC, with throughput, MPSC scaling,
+revocation-latency, and microarchitectural perf-counter measurements,
+all driven by a single shell command (\Cref{sec:eval}).
+\item A property-based oracle test, a CBMC bounded-model proof of
+capability monotonicity, and an MPSC-contention revocation test that
+together back every numerical claim in the paper
+(\Cref{sec:eval:correctness}).
+\end{enumerate}
+
+\Cref{sec:eval} reports per-message gate cost of \gateOverheadP99 ns at
+p99 across payload sizes 64 B--16 KiB, keeping the gated path within
+\aeronGapPercent\% of Aeron's RTT floor. The slot-indexed validate
+itself runs in \validateP99 ns at p99 \textit{regardless of pool
+occupancy} (\Cref{fig:figure-2}), confirming the $O(1)$ claim.
+
+\para{What we explicitly do not claim}
+$O(1)$ revocation is not an algorithmic novelty---Redell~\cite{redell74}
+and EROS~\cite{shapiro1999eros} established the pattern, and
+Cornucopia\,Reloaded~\cite{cornucopia-reloaded} is a recent peer.
+Our contribution is the \textit{first software-only realisation on
+stock Linux}, with measured numbers under contention. memfd zero-copy
+IPC is similarly not novel as a substrate---Aeron and io_uring share
+the design template; we reuse it and gate it.
+
+\para{Roadmap}
+\Cref{sec:threat} states the threat model. \Cref{sec:bg} compares
+against capability OSes and modern IPC primitives. \Cref{sec:design}
+develops the slot-indexed gate. \Cref{sec:impl} reports the C++
+implementation, the M-21 NASM constant-time primitives, and the CBMC
+proof. \Cref{sec:eval} presents the evaluation. \Cref{sec:disc}
+discusses limitations including the C++ language stance.
+\Cref{sec:rw} surveys related work in detail. \Cref{sec:conclusion}
+concludes.

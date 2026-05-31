@@ -98,8 +98,8 @@ set_tests_properties(Sprint5GateConcurrencyTest PROPERTIES TIMEOUT 30)
 message(STATUS "  [M-03] test_ipc_sprint5_gate_concurrency configured")
 
 # Sprint 9 — libFuzzer harness for the gated path. Only built when
-# the fuzz preset is active (libFuzzer + ASan in CMAKE_CXX_FLAGS).
-if(ASTRA_FUZZ_BUILD)
+# the fuzz preset is active (-DASTRA_ENABLE_FUZZING=ON).
+if(ASTRA_ENABLE_FUZZING)
     add_executable(fuzz_gate_target fuzz/fuzz_gate_target.cpp)
     target_link_libraries(fuzz_gate_target
         PRIVATE

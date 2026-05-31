@@ -1,0 +1,57 @@
+% =============================================================================
+% Paper 1 macros — keep terminology identical across sections.
+% =============================================================================
+
+\newcommand{\sysname}{\textsc{Astra}\xspace}
+\newcommand{\sysnamefull}{\textsc{Astra Runtime}\xspace}
+
+% Modules
+\newcommand{\Mone}{M-01\xspace}
+\newcommand{\Mthree}{M-03\xspace}
+\newcommand{\Mtwentyone}{M-21\xspace}
+
+% Concepts
+\newcommand{\captoken}{capability token\xspace}
+\newcommand{\captokens}{capability tokens\xspace}
+\newcommand{\capgate}{capability gate\xspace}
+\newcommand{\slotidx}{slot index\xspace}
+\newcommand{\fastpath}{fast path\xspace}
+
+% Permissions
+\newcommand{\IPCSEND}{\texttt{IPC\_SEND}\xspace}
+\newcommand{\IPCRECV}{\texttt{IPC\_RECV}\xspace}
+
+% Numerical placeholders — fill in after Fedora sweep.
+% These are DEFAULTS; override by `\renewcommand{\valdiateP99}{42}` after
+% running scripts/run_paper1_sweep.sh. The build.sh helper loads
+% papers/paper1/numbers.tex (auto-generated from CSVs) if present.
+\newcommand{\validateMean}  {\todoNum{validate mean ns}}
+\newcommand{\validateP50}   {\todoNum{validate p50 ns}}
+\newcommand{\validateP99}   {\todoNum{validate p99 ns}}
+\newcommand{\validateP9999} {\todoNum{validate p99.99 ns}}
+
+\newcommand{\rawAstraRTT}   {\todoNum{astra raw RTT p99 ns}}
+\newcommand{\gatedAstraRTT} {\todoNum{astra gated RTT p99 ns}}
+\newcommand{\aeronRTT}      {\todoNum{aeron RTT p99 ns}}
+\newcommand{\iouringRTT}    {\todoNum{io_uring RTT p99 ns}}
+\newcommand{\pipeRTT}       {\todoNum{pipe RTT p99 ns}}
+
+\newcommand{\gateOverheadP50} {\todoNum{gate p50 \Delta ns}}
+\newcommand{\gateOverheadP99} {\todoNum{gate p99 \Delta ns}}
+\newcommand{\aeronGapPercent} {\todoNum{aeron gap \%}}
+
+\newcommand{\peakRawTput}    {\todoNum{raw peak msgs/s}}
+\newcommand{\peakGatedTput}  {\todoNum{gated peak msgs/s}}
+
+\newcommand{\revokeP99}      {\todoNum{revoke window p99 \mu s}}
+
+% Pretty placeholder marker so reviewers see what is unfilled.
+\newcommand{\todoNum}[1]{\textcolor{red}{\textbf{[#1]}}}
+
+\newcommand{\eg}{e.g.,\xspace}
+\newcommand{\ie}{i.e.,\xspace}
+\newcommand{\cf}{c.f.,\xspace}
+\newcommand{\etal}{et al.\xspace}
+
+% Paragraph headers
+\newcommand{\para}[1]{\noindent\textbf{#1.}\xspace}

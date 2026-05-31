@@ -1,0 +1,179 @@
+\section{Design}
+\label{sec:design}
+
+\sysname's design centres on three primitives: the \captoken, the
+\texttt{CapabilityManager} that mints and revokes them, and the
+\capgate that fronts every IPC operation.
+
+\subsection{Token format}
+\label{sec:design:token}
+
+A \captoken is a 192-bit value type (\Cref{fig:token}). Tokens are
+passed by value, copied freely, and contain no pointers. The
+authoritative state lives in the \texttt{CapabilityManager}'s pool;
+the token is the keying material that names a slot.
+
+\begin{figure}[t]
+\centering\small
+\begin{tabular}{|c|c|}
+\hline
+\textbf{Field} & \textbf{Bits} \\
+\hline
+\texttt{m\_arrUId[0]} : slot index   & 32 \\
+\texttt{m\_arrUId[0]} : random       & 32 \\
+\texttt{m\_arrUId[1]} : random       & 64 \\
+\texttt{m\_ePermissions}             & 64 \\
+\texttt{m\_uEpoch}                   & 64 \\
+\texttt{m\_uOwnerId}                 & 64 \\
+\texttt{m\_arrUParentId}             & 128 \\
+\hline
+\end{tabular}
+\caption{Capability-token wire layout. The \texttt{m\_arrUId[0]}
+high half is the slot-index hint that powers the $O(1)$ validate
+path; the remaining 96 bits are RDRAND randomness.}
+\label{fig:token}
+\end{figure}
+
+The 128-bit identifier (\texttt{m\_arrUId}) splits as 32 bits of slot
+index plus 96 bits of RDRAND randomness. The split is the central
+design choice and is justified in \Cref{sec:design:fastpath}.
+
+\subsection{Permission monotonicity}
+\label{sec:design:mono}
+
+Children derived from a parent token may carry a permission set that
+is a strict subset of the parent's. \texttt{CapabilityManager::derive}
+enforces this invariant; an attempt to derive with a non-subset
+permission mask returns \texttt{Result::error}. The CBMC bounded-model
+proof (\Cref{sec:impl:cbmc}) checks this property over all possible
+parent / child permission pairs in the supported bitmask.
+
+The motivation is the standard capability discipline: once a
+permission has been removed in the derivation chain, it cannot be
+recovered without going back to a higher-permission ancestor.
+\sysname does not currently support \textit{regrant} (re-issuing a
+permission that has been revoked); this is by design.
+
+\subsection{The slot-indexed validate fast path}
+\label{sec:design:fastpath}
+
+The most consequential design decision is the layout of the
+\texttt{validate} path.
+
+\para{Why the natural design is too slow}
+A typical capability validate path looks roughly like:
+\begin{enumerate}
+\itemsep0pt
+\item Hash the 128-bit token identifier to an index in a side table.
+\item Load the bucket; walk a chain.
+\item On match, check epoch, check permission, check
+\texttt{m\_uRevokedAtEpoch}.
+\end{enumerate}
+On a 4096-token pool, even with a perfect hash this costs roughly one
+load (the bucket head) plus one constant-time compare; on a large
+pool with collision chains, it can cost two or more cache misses
+before the compare even fires. On the IPC fastpath, where the
+producer and consumer each call \texttt{validate} once per message,
+this dwarfs the rest of the cost.
+
+\para{Our approach}
+We embed the slot index inside the token's identifier itself:
+
+\begin{equation*}
+\texttt{m\_arrUId[0]} \;=\; (\text{slot}_{32} \ll 32) \;|\;
+                            \text{rand}_{32}
+\end{equation*}
+
+\noindent
+\texttt{validate} then runs:
+
+\begin{verbatim}
+slot = m_arrUId[0] >> 32;
+if (slot >= max_tokens) return false;
+TokenSlot& s = pool[slot];
+if (!s.active || s.revoked_at) return false;
+if (asm_ct_compare(s.token.uid,
+                   token.uid, 16) != 0)
+    return false;
+if (token.epoch > current_epoch) return false;
+return (token.perms & required) == required;
+\end{verbatim}
+
+\para{Why this is safe}
+The slot index is treated as a \textit{hint}, not a credential. An
+attacker who forges a slot index gets a deterministic indirection
+into the pool; the constant-time compare on the full 128 bits then
+has to match. The forgery space remains $2^{96}$. The bounds check
+on the slot makes out-of-range indices reject without an
+out-of-bounds load (\Cref{sec:eval:correctness}, T-OOB).
+
+\para{Why this is fast}
+The validate path's data-dependent work is a single shift, a single
+load (\texttt{pool[slot]}), and a single \texttt{ct\_compare} on
+16~bytes. The cache load is the only memory access; the rest is in
+registers. \Cref{fig:figure-2} confirms the cost is flat across pool
+sizes from 16 to 4090 active tokens.
+
+\para{Constant-time compare}
+The 128-bit identifier compare uses the M-21
+\texttt{asm\_ct\_compare} primitive, which fans the bytes through a
+running OR and returns a single-bit verdict. This is necessary
+because a non-constant-time compare would leak which byte differs
+first, allowing a chosen-token attack to recover slots that have
+already been allocated.
+
+\subsection{Cascading revocation}
+\label{sec:design:revoke}
+
+\texttt{revoke(t)} marks $t$ inactive in the pool, then walks the
+descendants of $t$ via the \texttt{m\_arrUParentId} backpointer and
+marks each of them inactive too. Each revocation increments the
+global epoch counter; tokens whose epoch number lags the current
+global epoch are rejected by validate without any further work.
+
+The cascade portion is $O(d)$ where $d$ is the number of active
+descendants of the revoked token---the same complexity the seminal
+EROS pattern carries. The single-token case (the common case) is
+$O(1)$ via the slot-index trick, just like validate.
+
+A revoked token's slot is securely wiped (\texttt{asm\_secure\_wipe})
+to prevent stale data from being reused. The slot is freed for
+reuse on the next \texttt{create()}.
+
+\subsection{The capability gate on the IPC fastpath}
+\label{sec:design:gate}
+
+The \capgate binds a \texttt{CapabilityManager*} and a
+\texttt{CapabilityToken} to one endpoint of an IPC channel
+(\Cref{fig:gate}). A typical \sysname channel has two gates: one
+stamped \IPCSEND held by the producer endpoint, one stamped \IPCRECV
+held by the consumer endpoint. Each \texttt{writeGated()} call
+invokes \texttt{validate()} \textit{before} attempting to claim ring
+space; each \texttt{readGated()} invokes \texttt{validate()} before
+attempting to consume.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.95\columnwidth]{figures/gate_path}
+\caption{The capability gate on the IPC fastpath. The
+\texttt{CapabilityGate} sits in front of the existing
+\texttt{RingBuffer::write/read} machinery; on validate failure no
+ring state is mutated.}
+\label{fig:gate}
+\end{figure}
+
+\para{The denied-request invariant}
+A denied request must leave the ring's
+\texttt{m\_uWriteClaimIndex} and \texttt{m\_uWriteIndex} unchanged.
+Without this property, a revoked principal could DOS a channel by
+burning claim space without ever committing. \Cref{sec:eval:correctness}
+T-RingFP exercises this invariant directly; the test asserts that
+neither index advances after any of the three deny modes (unbound
+gate, missing permission, revoked token).
+
+\para{The blocking-read invariant}
+\texttt{readWaitGated()} re-validates after every futex wake-up. A
+token can be revoked while a reader is parked on the futex; if we
+delivered a message past the revoke epoch on a stale wake, the gate
+would have a window. Re-validation closes the window at one extra
+\texttt{validate()} call per wake (sub-100\,ns).

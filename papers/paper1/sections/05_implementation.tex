@@ -1,0 +1,169 @@
+\section{Implementation}
+\label{sec:impl}
+
+\sysname is implemented in C++23 using \texttt{cmake} as the build
+driver. The codebase is approximately 7,400 lines of source code
+across the three subsystems we describe in this section: the
+capability manager (\Mone), the IPC ring (\Mthree), and the M-21
+assembly primitives.
+
+\subsection{Capability manager (\Mone)}
+\label{sec:impl:cap}
+
+\Mone is a single C++ class, \texttt{CapabilityManager}, with a
+fixed-capacity slot pool sized at construction time
+(\texttt{DEFAULT\_MAX\_TOKENS}\,=\,4096). The pool is a
+heap-allocated flat array of \texttt{TokenSlot} structures. There is
+no dynamic allocation in the validate or revoke paths.
+
+\para{Concurrency}
+\texttt{validate()} is lock-free: it loads the global
+\texttt{m\_uCurrentEpoch} with acquire ordering, performs an O(1)
+slot lookup, and returns. \texttt{create()}, \texttt{derive()}, and
+\texttt{revoke()} serialise through a custom spinlock
+(\texttt{m\_bSpinlock}) which guards the slot-allocation, descendant
+search, and bookkeeping fields. The lock release on these paths
+performs a release-store of the spinlock byte, which establishes the
+synchronizes-with edge any subsequent \texttt{validate()} on another
+core needs to see the new state.
+
+\para{Token-id minting}
+\texttt{generateTokenId(slot, out)} fills the 128-bit identifier from
+RDRAND (via the M-21 \texttt{asm\_rdrand64} wrapper) and packs the
+slot index into the high 32 bits of \texttt{out[0]}. Both 64-bit
+halves are checked for RDRAND failure; we fall back to an
+epoch-XOR-magic-constant value with a logged warning if RDRAND fails
+(this should not happen on supported microarchitectures but is
+required for graceful degradation).
+
+\subsection{Ring buffer (\Mthree)}
+\label{sec:impl:ring}
+
+\Mthree is a single-producer, single-consumer ring buffer with an
+MPSC-capable claim path. The ring data and three-cache-line control
+block live in a \texttt{memfd\_create} region mapped
+\texttt{MAP\_SHARED} into both endpoints. The control block layout
+(\Cref{fig:cb}) places the claim/commit indices and the read index
+on separate cache lines to avoid false sharing.
+
+\begin{figure}[t]
+\centering\small
+\begin{verbatim}
++--------------------------------+ line 0
+| atomic<u64> write_index        |
+| atomic<u64> write_claim_index  |
++--------------------------------+ line 1
+| atomic<u64> read_index         |
++--------------------------------+ line 2
+| u32 channel_id, ring_bytes ... |
++--------------------------------+ 192B total
+\end{verbatim}
+\caption{\texttt{ChannelControlBlock} layout. The static\_assert that
+the struct is exactly 3$\times$64\,B is enforced at compile time.}
+\label{fig:cb}
+\end{figure}
+
+\para{Two-phase claim/commit}
+For payloads $\le 256$\,B the producer claims its byte range with a
+single \texttt{fetch\_add} on \texttt{write\_claim\_index}
+(wait-free); for larger payloads it CASes (lock-free with bounded
+retries). After writing the data, the producer advances
+\texttt{write\_index} with a CAS that spins on the prior committed
+value, ensuring readers observe a contiguous ordered byte stream
+regardless of how many producers raced.
+
+\para{The capability gate}
+\texttt{writeGated(\&\_gate, data, len)} calls
+\texttt{gate.m\_pManager->validate(gate.m\_token, IPC\_SEND)} and
+returns \texttt{PERMISSION\_DENIED} on failure, leaving
+\texttt{write\_claim\_index} untouched. On success it forwards to
+\texttt{write(data, len)}. The gate sits in front of the claim, so a
+revoked token cannot consume claim space.
+
+\para{The blocking variant}
+\texttt{readWaitGated()} parks on \texttt{write\_index.wait()} (which
+maps to a futex on Linux) and re-validates after each wake. The
+extra validate is the cost of preserving correctness across
+revocations that fire while the reader is asleep.
+
+\subsection{M-21 constant-time primitives}
+\label{sec:impl:asm}
+
+The \Mtwentyone module ships seven assembly-language routines hand-written in
+NASM following the System V AMD64 ABI:
+\texttt{asm\_ct\_compare} (constant-time 16-byte compare),
+\texttt{asm\_secure\_wipe} (memset that the optimiser cannot remove),
+\texttt{asm\_rdrand64} (RDRAND wrapper),
+\texttt{asm\_lfence}, \texttt{asm\_cache\_flush},
+\texttt{asm\_spectre\_barrier}, \texttt{asm\_stack\_guard}.
+
+These are not contributions of the paper---libsodium and BoringSSL
+ship equivalents---but the constant-time discipline matters because
+we use \texttt{asm\_ct\_compare} on the IPC fastpath. We mention this
+in Implementation rather than Design because the design is
+agnostic to the comparator implementation.
+
+\subsection{CBMC monotonicity proof}
+\label{sec:impl:cbmc}
+
+We model the permission arithmetic of \texttt{CapabilityManager}
+in a small C-flat translation
+(\texttt{formal/cbmc/capability\_monotonicity.c}, 280 LOC) and prove
+three properties using CBMC~\cite{cbmc}:
+
+\begin{description}
+\itemsep0pt
+\item[Subset-on-success] If \texttt{derive(parent, child\_perms)}
+returns success, then \texttt{(child\_perms \& \textasciitilde
+parent\_perms) == 0}.
+\item[Rejection-bijection] If \texttt{derive} returns failure, then
+\texttt{(child\_perms \& \textasciitilde parent\_perms) != 0} (and
+vice versa).
+\item[No-recovery-through-chain] For any derivation chain
+$t_0 \to t_1 \to \dots \to t_n$, the permission set of $t_n$ is a
+subset of the permission set of $t_0$.
+\end{description}
+
+CBMC reports 0 of 37 checks failing on the model in
+\texttt{formal/cbmc/Makefile}'s \texttt{verify} target. We frame this
+as \textit{spec correspondence on the one property the runtime must
+not get wrong}, not as a substitute for full functional verification
+in the seL4 sense~\cite{klein2009sel4}.
+
+\subsection{Reproducibility}
+\label{sec:impl:repro}
+
+The artefact (source, baselines, sweep script, plotting) is published
+at \ifanon\textcolor{red}{[anonymous URL during review]}\else
+\url{https://github.com/KernelArch-Lab/Astra}\fi.
+A single shell command, \texttt{scripts/run\_paper1\_sweep.sh},
+builds every harness, runs each in the same TSC domain on the same
+machine, concatenates the CSV rows into
+\texttt{artefact/paper1\_figure\_1.csv}, and produces Figures 1 and
+2 plus Table 1 via \texttt{plot\_paper1\_figure\{,\_2\}.py}.
+\Cref{tab:artefact} maps each figure and claim to its source.
+
+\begin{table}[t]
+\centering\small
+\begin{tabular}{lll}
+\toprule
+Figure / claim         & Source script         & Output \\
+\midrule
+Fig 1 latency          & \texttt{run\_paper1\_sweep.sh} \tiny\texttt{+plot 1} & \texttt{paper1\_figure\_1.pdf} \\
+Fig 2 O(1) validate    & \texttt{bench\_pool\_scaling}    \tiny\texttt{+plot 2} & \texttt{paper1\_figure\_2.pdf} \\
+Tbl 1 256\,B comparison & \texttt{plot\_paper1\_figure.py}                       & \texttt{paper1\_table\_1.tex}  \\
+Throughput             & \texttt{bench\_throughput}                              & CSV                          \\
+MPSC scaling           & \texttt{bench\_throughput\_mpsc}                        & CSV                          \\
+Revoke window          & \texttt{bench\_revocation\_latency}                     & CSV                          \\
+Cycles / cache misses  & \texttt{bench\_perfcounters}                            & CSV                          \\
+Monotonicity proof     & \texttt{make -C formal/cbmc verify}                     & CBMC report                  \\
+Concurrency stress     & \texttt{test\_capability\_concurrency}                  & ctest pass                   \\
+Survivability          & \texttt{test\_capability\_survivability}                & ctest pass                   \\
+Gate concurrency       & \texttt{test\_sprint5\_gate\_concurrency}               & ctest pass                   \\
+Property test          & \texttt{test\_capability\_property}                     & ctest pass                   \\
+\bottomrule
+\end{tabular}
+\caption{Artefact map. Every numerical claim and every functional
+correctness claim in this paper has a CI-runnable script.}
+\label{tab:artefact}
+\end{table}

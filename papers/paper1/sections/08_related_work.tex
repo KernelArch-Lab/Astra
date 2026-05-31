@@ -1,0 +1,92 @@
+\section{Related work — extended}
+\label{sec:rw}
+
+\subsection{Capability-based operating systems}
+
+The capability discipline traces to Dennis~\&\
+Van~Horn~\cite{dennis1966}; Hydra and StarOS in the 1970s carried it
+forward. Redell's thesis~\cite{redell74} introduced the
+epoch-versioned credential pattern for revocation, the algorithmic
+ancestor of every capability-revocation system since. KeyKOS,
+EROS~\cite{shapiro1999eros}, and CapROS~\cite{capros} demonstrated
+the pattern at OS scale; Coyotos refined the typing
+discipline. seL4~\cite{klein2009sel4} closed the loop with full
+functional-correctness verification.
+
+Recent capability-system work splits along the question of whether
+capability identifiers should be \textit{names} (KeyKOS-style) or
+\textit{addresses} (CHERI-style). \sysname's tokens are names, with
+the slot index serving as a deterministic address-like hint
+(\Cref{sec:design:fastpath}); we get the cache behaviour of
+addresses without losing the forgeability resistance of names.
+
+\subsection{Hardware-capability systems}
+
+CHERI~\cite{cheri-asplos15,cheri-tcg22} is the most-developed
+hardware-capability platform; CAP-VMs~\cite{capvms} layers
+capability-isolation on CHERI/Morello.
+Cornucopia\,Reloaded~\cite{cornucopia-reloaded} is the recent peer for
+the revocation pattern itself; the algorithm \sysname uses is theirs,
+but our realisation is software-only on stock Linux.
+PICASSO~\cite{picasso} (S\&P~'24) takes a hardware-provenance approach
+to bulk invalidation that has a similar effect.
+
+\subsection{Userspace IPC primitives}
+
+Aeron~\cite{aeron-real-logic} is the most-published Aeron-class
+single-host IPC number we are aware of. ByteDance's
+shmipc~\cite{bytedance-shmipc} is production-deployed in Service
+Mesh and is architecturally similar.
+io\_uring~\cite{iouring} prototyped the same template (mmap'd
+SQ/CQ rings with futex notification) inside the Linux kernel; our
+ring buffer is an above-the-kernel reuse of that template.
+
+eRPC~\cite{erpc} (NSDI '19) is the published peer-reviewed RPC
+number with the lowest latency we are aware of (~2.3\,$\mu$s
+single-hop request/response over DPDK).
+LITESHIELD~\cite{liteshield} (USENIX ATC '25) is the most-recent
+userspace $\mu$kernel-style runtime on Linux; the architectural
+overlap is real (ours adds the capability layer).
+Cap'n~Proto's RPC layer~\cite{capnproto-rpc} sits at a higher
+level---marshalling and authorization on top of a transport---and is
+not a fair comparison for raw IPC RTT.
+
+\subsection{Kernel-resident capability systems on Linux}
+
+HongMeng~\cite{hongmeng} (OSDI '24) and CertiKOS~\cite{certikos} are
+the closest kernel-resident capability systems with Linux-compatible
+positioning. \sysname's contribution is sitting above them in the
+stack rather than competing with them in it. Our framing borrows
+from HongMeng's own authors' analysis of the tradeoff between pure
+capabilities and address tokens (\Cref{sec:disc:hongmeng}).
+
+\subsection{Confidential-compute capability binding}
+
+Recent confidential-compute work has begun to explore capability
+mediation tied to attestation reports.
+ScaleTrust~\cite{scaletrust} discusses TDX-bound credentials;
+Conclave~\cite{conclave} discusses SEV-SNP-sealed objects.
+\sysname's design intentionally leaves this to follow-up work
+(M-23~ConfCompute) and stays within the Linux process boundary.
+
+\subsection{LLM-agent sandboxing}
+
+The Anthropic Computer Use~\cite{anthropic-cu}, OpenAI Agents
+SDK~\cite{openai-agents}, and Devin~\cite{devin} stacks all sandbox
+agent tool calls; none currently expose a capability layer above the
+syscall boundary. NIST AI~600-1~\cite{nist-ai-600-1} and EU AI Act
+Article~15~\cite{euaiact15} demand verifiable mediation. We see
+\sysname as the runtime substrate this demand will pull into
+existence; the AgentGuard module (M-22 in our roadmap) is in
+preparation as Paper~3.
+
+\subsection{Formal verification}
+
+CBMC~\cite{cbmc} bounded-model checking is the technique we use for
+the monotonicity proof; SPIN~\cite{spin} would have been an
+alternative for the LTL fragment, but our property is a quantifier-free
+boolean and CBMC is more direct. Our scope (one property, 280 LOC C
+model, 37 checks) is many orders of magnitude smaller than the
+seL4 effort~\cite{klein2009sel4} and we frame it as
+\textit{spec-correspondence}, not as functional correctness in seL4's
+sense.
