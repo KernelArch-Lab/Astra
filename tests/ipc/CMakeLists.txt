@@ -82,6 +82,36 @@ target_link_libraries(test_ipc_sprint5_cap_gate
 add_test(NAME Sprint5IpcCapGateTest COMMAND test_ipc_sprint5_cap_gate)
 message(STATUS "  [M-03] test_ipc_sprint5_cap_gate configured")
 
+# Sprint 9 — gate concurrency: revoke under MPSC contention
+add_executable(test_ipc_sprint5_gate_concurrency
+    test_sprint5_gate_concurrency.cpp
+)
+target_link_libraries(test_ipc_sprint5_gate_concurrency
+    PRIVATE
+        astra_ipc
+        astra_core
+        astra_asm_core
+        pthread
+)
+add_test(NAME Sprint5GateConcurrencyTest COMMAND test_ipc_sprint5_gate_concurrency)
+set_tests_properties(Sprint5GateConcurrencyTest PROPERTIES TIMEOUT 30)
+message(STATUS "  [M-03] test_ipc_sprint5_gate_concurrency configured")
+
+# Sprint 9 — libFuzzer harness for the gated path. Only built when
+# the fuzz preset is active (libFuzzer + ASan in CMAKE_CXX_FLAGS).
+if(ASTRA_FUZZ_BUILD)
+    add_executable(fuzz_gate_target fuzz/fuzz_gate_target.cpp)
+    target_link_libraries(fuzz_gate_target
+        PRIVATE
+            astra_ipc
+            astra_core
+            astra_asm_core
+            pthread)
+    target_compile_options(fuzz_gate_target PRIVATE -fsanitize=fuzzer)
+    target_link_options   (fuzz_gate_target PRIVATE -fsanitize=fuzzer)
+    message(STATUS "  [M-03] fuzz_gate_target configured (libFuzzer)")
+endif()
+
 # Sprint 5 microbench: gate-on vs gate-off latency (Paper 1 headline figure)
 add_executable(bench_ipc_with_gate
     bench_ipc_with_gate.cpp

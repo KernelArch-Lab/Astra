@@ -29,6 +29,27 @@ target_link_libraries(test_capability
 )
 add_test(NAME CapabilityUnitTest COMMAND test_capability)
 
+# Sprint 9 — concurrency / survivability / property tests for §6 evidence.
+add_executable(test_capability_concurrency  unit/test_capability_concurrency.cpp)
+add_executable(test_capability_survivability unit/test_capability_survivability.cpp)
+add_executable(test_capability_property     unit/test_capability_property.cpp)
+foreach(_t test_capability_concurrency
+           test_capability_survivability
+           test_capability_property)
+    target_link_libraries(${_t}
+        PRIVATE
+            astra_core
+            astra_asm_core
+            pthread)
+endforeach()
+add_test(NAME CapabilityConcurrencyTest    COMMAND test_capability_concurrency)
+add_test(NAME CapabilitySurvivabilityTest  COMMAND test_capability_survivability)
+add_test(NAME CapabilityPropertyTest       COMMAND test_capability_property)
+# Stress tests can take >30s; bump default ctest timeout.
+set_tests_properties(CapabilityConcurrencyTest   PROPERTIES TIMEOUT 60)
+set_tests_properties(CapabilitySurvivabilityTest PROPERTIES TIMEOUT 60)
+set_tests_properties(CapabilityPropertyTest      PROPERTIES TIMEOUT 60)
+
 # Integration tests - real fork/exec spawning
 add_executable(test_phase2_integration integration/test_spawn_real.cpp)
 target_link_libraries(test_phase2_integration
