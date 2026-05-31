@@ -71,8 +71,56 @@ mkdir -p numbers figures
 [[ -f numbers/numbers.tex ]] || echo "% placeholder" > numbers/numbers.tex
 [[ -f numbers/table_1.tex ]] || echo "\\textit{Run build.sh --refresh.}" > numbers/table_1.tex
 [[ -f numbers/table_perf.tex ]] || echo "\\textit{Run build.sh --refresh.}" > numbers/table_perf.tex
-[[ -f figures/gate_path.pdf ]] || \
-    : "no gate_path.pdf yet — generate via figures/Makefile or TikZ"
+
+# ---------------------------------------------------------------------------
+# Stub PDFs for figures the sections \includegraphics{}.
+#
+# Without these, pdflatex on a cold-clone (no --refresh, no sweep run yet)
+# fails because the figure paths don't resolve. We build ONE stub.pdf
+# (a single pdflatex pass on a tiny \fbox stub) and copy it to each
+# missing figure target. The result: a buildable PDF where every missing
+# figure is rendered as a labelled "[Figure X — run --refresh]" box.
+#
+# This block is a NO-OP when the real PDFs already exist (refresh did them,
+# or a previous build did this stub pass — first-build-only cost).
+# ---------------------------------------------------------------------------
+REQUIRED_FIGS=(
+    figures/gate_path.pdf
+    figures/paper1_figure_1.pdf
+    figures/paper1_figure_2.pdf
+    figures/paper1_figure_3_mpsc.pdf
+    figures/paper1_figure_4_revoke.pdf
+)
+NEED_STUB=0
+for f in "${REQUIRED_FIGS[@]}"; do
+    [[ -f "$f" ]] || { NEED_STUB=1; break; }
+done
+
+if [[ $NEED_STUB -eq 1 ]] && command -v pdflatex >/dev/null 2>&1; then
+    echo "==> Some figure PDFs missing — building stubs (one pdflatex pass)"
+    STUB_DIR="$(mktemp -d)"
+    cat > "$STUB_DIR/_stub.tex" <<'STUB_TEX'
+\documentclass[border=2mm]{standalone}
+\usepackage{xcolor}
+\begin{document}
+\fcolorbox{red}{red!5}{%
+  \parbox{8cm}{\centering
+    \large\textbf{[Figure placeholder]}\\[2mm]
+    \small Re-run \texttt{./build.sh --refresh} on a Linux x86\_64 host
+    after \texttt{./scripts/run\_paper1\_sweep.sh}.}}
+\end{document}
+STUB_TEX
+    ( cd "$STUB_DIR" && pdflatex -interaction=nonstopmode -halt-on-error _stub.tex >/dev/null 2>&1 )
+    if [[ -f "$STUB_DIR/_stub.pdf" ]]; then
+        for f in "${REQUIRED_FIGS[@]}"; do
+            [[ -f "$f" ]] || cp "$STUB_DIR/_stub.pdf" "$f"
+        done
+        echo "==> Stub PDFs in place: $(printf '%s ' "${REQUIRED_FIGS[@]}")"
+    else
+        echo "==> WARNING: stub pdflatex failed; main.tex may not build"
+    fi
+    rm -rf "$STUB_DIR"
+fi
 
 # Plain LaTeX pipeline.
 pdflatex -interaction=nonstopmode -halt-on-error main.tex

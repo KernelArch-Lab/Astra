@@ -29,6 +29,12 @@
 
 \input{macros}
 
+% Auto-generated numbers from scripts/gen_numbers_tex.py.
+% Overrides the \todoNum placeholders in macros.tex when present.
+% Empty placeholder ships in numbers/numbers.tex; build.sh --refresh
+% regenerates it from the artefact CSVs.
+\InputIfFileExists{numbers/numbers}{}{}
+
 % Anonymize for double-blind submission. Set to false for camera-ready.
 \newif\ifanon
 \anontrue
