@@ -38,12 +38,20 @@ target_include_directories(astra_asm_core
 
 # C++ side still wants these intrinsics enabled for any inline asm in
 # headers and for the compiler's awareness of the target microarch.
+#
+# IMPORTANT: gate to C/CXX. The astra_asm_core target has BOTH C++ TUs
+# (asm_core_stubs.cpp) AND NASM TUs (*.asm). target_compile_options
+# applies to ALL of them by default, and NASM has no concept of
+# `-march`/`-mrdrnd` — it errors with `nasm: error: unrecognised
+# option '-m'`. Each flag is wrapped in its own genex so the list
+# expansion can't glue the closing `>` onto the last element.
+# Caught on third Fedora build, 2026-05-31.
 target_compile_options(astra_asm_core
     PRIVATE
-        -mrdrnd          # RDRAND
-        -msse4.2         # SSE 4.2 baseline
-        -maes            # AES-NI
-        -mclflushopt     # CLFLUSHOPT
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-mrdrnd>"        # RDRAND
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-msse4.2>"       # SSE 4.2 baseline
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-maes>"          # AES-NI
+        "$<$<COMPILE_LANGUAGE:C,CXX>:-mclflushopt>"   # CLFLUSHOPT
 )
 
 message(STATUS "  [M-21] astra_asm_core: 7 NASM primitives + C++ wrapper")

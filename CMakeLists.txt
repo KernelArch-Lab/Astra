@@ -66,13 +66,18 @@ option(ASTRA_ENABLE_COVERAGE    "Enable code coverage"               OFF)
 # --------------------------------------------------------------------------
 set(ASTRA_HARDENING_FLAGS
     -fstack-protector-strong
-    -D_FORTIFY_SOURCE=2
     -fPIE
     -fno-delete-null-pointer-checks
     -fno-strict-overflow
     -fno-strict-aliasing
     -ftrapv
 )
+
+# _FORTIFY_SOURCE is only meaningful with optimization on; glibc
+# headers actually #warning it out under -O0 (Debug) and -Werror=cpp
+# turns that into a hard error. It is applied below via an inline
+# generator expression gated to non-Debug + C/CXX.
+# Caught on third Fedora build, 2026-05-31.
 
 set(ASTRA_HARDENING_LINKER_FLAGS
     -pie
@@ -176,6 +181,11 @@ foreach(_astra_flag IN LISTS ASTRA_SANITIZER_FLAGS)
         add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:${_astra_flag}>")
     endif()
 endforeach()
+# _FORTIFY_SOURCE already carries its own $<CONFIG:Debug> guard;
+# still gate to C/CXX so NASM never sees the -D form.
+add_compile_options(
+    "$<$<AND:$<COMPILE_LANGUAGE:C,CXX>,$<NOT:$<CONFIG:Debug>>>:-D_FORTIFY_SOURCE=2>"
+)
 unset(_astra_flag)
 
 add_link_options(${ASTRA_HARDENING_LINKER_FLAGS})
