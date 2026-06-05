@@ -177,9 +177,24 @@ std::vector<sock_filter> SeccompFilter::buildParanoidFilter()
         __NR_arch_prctl,
         __NR_set_tid_address, __NR_set_robust_list,
         __NR_prlimit64, __NR_getrandom,
+        __NR_rseq,                  // glibc 2.35+ restartable sequences
+                                    //   — called unconditionally on every
+                                    //   thread/process startup; if blocked
+                                    //   the process dies silently with
+                                    //   SIGSYS BEFORE any printf flushes,
+                                    //   so the failure mode is "exit 1
+                                    //   with no diagnostic output".
+        __NR_prctl,                 // generic prctl. SeccompFilter itself
+                                    //   uses prctl during setup; allowing
+                                    //   it post-install is no worse —
+                                    //   PR_SET_NO_NEW_PRIVS already locked
+                                    //   in, so attackers can't gain priv
+                                    //   via PR_SET_*. Mostly used by
+                                    //   glibc for PR_SET_NAME and friends.
 
         // Time
         __NR_clock_gettime, __NR_clock_nanosleep, __NR_nanosleep,
+        __NR_gettimeofday,          // older time API; some glibc paths
     };
 
     std::vector<sock_filter> lInstructions;
