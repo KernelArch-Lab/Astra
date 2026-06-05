@@ -155,6 +155,8 @@ std::vector<sock_filter> SeccompFilter::buildParanoidFilter()
 
         // File metadata — modern libc uses newfstatat/statx
         __NR_fstat, __NR_newfstatat, __NR_statx,
+        __NR_getdents64,            // readdir() under glibc — needed
+                                    //   to walk /proc, /usr/lib, etc.
 
         // Process identity — needed by getpid()==1 PID-NS check
         // and any program that asks who it is.
