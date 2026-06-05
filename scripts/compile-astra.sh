@@ -108,6 +108,7 @@ cmd_deps() {
         libbpf-devel elfutils-libelf-devel clang clang-tools-extra \
         liburing-devel \
         perf cbmc \
+        gdb strace \
         python3-matplotlib \
         texlive-scheme-medium texlive-collection-latexrecommended \
         git
