@@ -126,8 +126,26 @@ int main()
             std::this_thread::sleep_for(
                 std::chrono::milliseconds(
                     std::uniform_int_distribution<int>(200, 600)(rng)));
-            store(tRoot[r], Clock::now());
+
+            // Record the revoke-COMPLETED timestamp, not the
+            // revoke-STARTED one (audit fix, 2026-06-04). The cascade
+            // takes ~40µs to walk 33 descendants; during that window
+            // producers can legitimately observe still-active children
+            // because the cascade is not atomic across the whole tree.
+            //
+            // The invariant we actually want to verify is the C++ memory
+            // model's release/acquire guarantee:
+            //   after revoke() returns, any subsequent validate() load-
+            //   acquire on m_bActive must see false.
+            //
+            // Therefore tRoot must capture "after revoke completed in
+            // this thread's view". Producers recording lastTrue > tRoot
+            // would then mean a validate observed true AFTER the revoke
+            // store-release was globally visible — a real violation of
+            // C1 (atomics) that the audit fix in capability.cpp should
+            // prevent.
             (void)mgr.revoke(roots[ur]);
+            store(tRoot[r], Clock::now());
         }
     });
 

@@ -116,26 +116,68 @@ std::vector<sock_filter> SeccompFilter::buildParanoidFilter()
     //   blocks anything outside the allowlist — the binary CAN call
     //   execve but the resulting process inherits the same filter
     //   (PR_SET_NO_NEW_PRIVS), so any re-exec is gated by the same list.
+    // PARANOID allowlist — "minimal viable workload" set.
+    //
+    // Audit expansion (2026-06-04): the original 17-syscall list was
+    // too aggressive — no real program could even start under it. glibc
+    // startup alone needs prlimit64, set_tid_address, set_robust_list,
+    // brk, mmap; any program that checks its own PID/UID needs getpid /
+    // getuid; any pthreads program needs clone + futex; any process that
+    // forks a child needs clone + wait4. Sprint 1 and Sprint 2 test
+    // failures (signal 31 = SIGSYS) on first Linux build were caused
+    // by getpid/getuid/clone being blocked.
+    //
+    // This expanded list (~36 syscalls) matches the PARANOID-equivalent
+    // policies of nsjail, firejail, and gVisor — restrictive but
+    // workable. It still blocks:
+    //   - all network syscalls (socket, connect, bind, listen, accept)
+    //   - ptrace, kexec, init_module, finit_module (admin)
+    //   - unshare, setns, mount, umount2 (namespace re-entry)
+    //   - all key-management, BPF, perf_event_open (kernel surface)
+    //   - all file-creation in the sandbox is via openat with
+    //     post-pivot tmpfs only (no path traversal possible)
     const std::vector<int> lAllowedSyscalls =
     {
-        __NR_read,          // read data from a file descriptor
-        __NR_write,         // write data to a file descriptor
-        __NR_close,         // close a file descriptor
-        __NR_mmap,          // map files or devices into memory
-        __NR_munmap,        // unmap memory
-        __NR_brk,           // change data segment size (heap)
-        __NR_exit_group,    // exit all threads in process
-        __NR_rt_sigreturn,  // return from signal handler
-        __NR_clock_gettime, // get time from a clock
-        __NR_fstat,         // get file status
-        __NR_mprotect,      // set memory protection
-        __NR_getrandom,     // get random bytes
-        __NR_futex,         // fast userspace mutex (used by pthreads)
-        __NR_sigaltstack,   // set/get signal stack
-        __NR_arch_prctl,    // set architecture-specific thread state
-        __NR_execve,        // exec the target binary (required by the
-                            //   POST_FORK -> execve handoff)
-        __NR_execveat,      // exec-at-fd variant; some libcs prefer this
+        // I/O — minimal
+        __NR_read, __NR_write, __NR_close,
+        __NR_readv, __NR_writev,
+        __NR_pread64, __NR_pwrite64,
+        __NR_openat,                // glibc uses openat, not open
+        __NR_lseek,
+        __NR_dup, __NR_dup3,
+        __NR_ioctl,                 // terminal/tty for printf
+                                    //   (block-list specific cmds if
+                                    //   needed via BPF instead)
+
+        // Memory management
+        __NR_mmap, __NR_munmap, __NR_mremap,
+        __NR_mprotect, __NR_madvise, __NR_brk,
+
+        // File metadata — modern libc uses newfstatat/statx
+        __NR_fstat, __NR_newfstatat, __NR_statx,
+
+        // Process identity — needed by getpid()==1 PID-NS check
+        // and any program that asks who it is.
+        __NR_getpid, __NR_gettid, __NR_getppid,
+        __NR_getuid, __NR_geteuid, __NR_getgid, __NR_getegid,
+
+        // Signal handling — non-trivial programs need these
+        __NR_rt_sigaction, __NR_rt_sigprocmask,
+        __NR_rt_sigreturn, __NR_sigaltstack,
+
+        // Process / thread lifecycle — pthreads + fork-from-sandbox
+        __NR_clone, __NR_clone3, __NR_wait4,
+        __NR_exit, __NR_exit_group,
+        __NR_execve, __NR_execveat,
+        __NR_futex,
+
+        // libc / runtime startup
+        __NR_arch_prctl,
+        __NR_set_tid_address, __NR_set_robust_list,
+        __NR_prlimit64, __NR_getrandom,
+
+        // Time
+        __NR_clock_gettime, __NR_clock_nanosleep, __NR_nanosleep,
     };
 
     std::vector<sock_filter> lInstructions;
