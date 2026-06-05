@@ -11,9 +11,15 @@
 
 **C++23 · x86-64 Assembly · Linux only · pre-alpha**
 
-For the full picture — architecture, per-module status, build
-graph, integration patterns — read [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md).
+**New contributors start here** → [**docs/ASTRA_BIBLE.md**](docs/ASTRA_BIBLE.md).
+The bible is the canonical onboarding + reference document: what every
+module does, how they integrate, the build system, conventions, the
+full project history, audit findings, and a day-1-to-first-PR
+playbook.
+
 For the publication roadmap, read [docs/PUBLICATION_STRATEGY.md](docs/PUBLICATION_STRATEGY.md).
+The earlier [docs/PROJECT_GUIDE.md](docs/PROJECT_GUIDE.md) is still
+useful for its diagrams but is superseded by the bible.
 
 ---
 
