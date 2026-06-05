@@ -157,6 +157,14 @@ std::vector<sock_filter> SeccompFilter::buildParanoidFilter()
         __NR_fstat, __NR_newfstatat, __NR_statx,
         __NR_getdents64,            // readdir() under glibc — needed
                                     //   to walk /proc, /usr/lib, etc.
+        __NR_unlink, __NR_unlinkat, // file deletion in the per-process
+                                    //   tmpfs sandbox. The sandbox is
+                                    //   ephemeral (umounted on teardown)
+                                    //   so allowing delete inside it
+                                    //   enables no escape — confirmed
+                                    //   by strace on Sprint 2 grandchild
+                                    //   which dies at unlink("/tmp/...")
+                                    //   during test cleanup.
 
         // Process identity — needed by getpid()==1 PID-NS check
         // and any program that asks who it is.
