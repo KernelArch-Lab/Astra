@@ -275,6 +275,8 @@ if(ASTRA_ENABLE_TESTS)
     message(STATUS "Test suite enabled (Paper 1 baseline harnesses)")
     add_subdirectory(tests/asm_core)
     message(STATUS "Test suite enabled (M-21 ASM Core NASM ports)")
+    add_subdirectory(tests/walkthrough)
+    message(STATUS "Walkthrough binary enabled (debugger-friendly demo)")
 endif()
 
 # --------------------------------------------------------------------------
