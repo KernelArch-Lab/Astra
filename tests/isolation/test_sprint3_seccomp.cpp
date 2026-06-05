@@ -24,6 +24,7 @@
 #include <cstring>
 
 #include <fcntl.h>          // open(), O_RDONLY
+#include <sched.h>          // unshare(), CLONE_NEWUSER
 #include <sys/socket.h>     // socket(), AF_INET, SOCK_STREAM
 #include <sys/types.h>      // pid_t
 #include <sys/wait.h>       // waitpid(), WIFEXITED, WIFSIGNALED, WTERMSIG
@@ -165,19 +166,27 @@ static bool testBlockedSocket()
 }
 
 // ============================================================================
-// Test 3: Blocked syscall — execve() must cause SIGSYS.
+// Test 3: Blocked syscall — unshare() must cause SIGSYS.
 //
-// Why execve() is blocked:
-//   execve() is NOT on the PARANOID allowlist. A sandboxed process must
-//   not be able to replace itself with an arbitrary binary — that would
-//   completely bypass the sandbox.
+// Updated 2026-06-04: This test originally asserted execve() was blocked.
+// After audit fix O2 (commit 9506862), execve and execveat are now on
+// the PARANOID allowlist so the POST_FORK -> execve handoff in
+// ProcessManager::spawn can actually load the target binary. We test
+// a different admin-class syscall here: unshare(), which any sandboxed
+// process should be prevented from calling so it cannot create MORE
+// namespaces (a sandbox-escape primitive).
+//
+// Why unshare() is blocked:
+//   unshare() is NOT on the PARANOID allowlist. A sandboxed process
+//   must not be able to detach itself from the namespaces the isolation
+//   layer set up — that would let it spawn out from under us.
 //
 // What we verify (parent side):
 //   Same as Test 2 — child killed by SIGSYS.
 // ============================================================================
-static bool testBlockedExecve()
+static bool testBlockedUnshare()
 {
-    std::printf("\nTest 3: Blocked syscall (execve) must cause SIGSYS\n");
+    std::printf("\nTest 3: Blocked syscall (unshare) must cause SIGSYS\n");
 
     int lIWstatus = forkAndRun([]()
     {
@@ -185,14 +194,11 @@ static bool testBlockedExecve()
         astra::isolation::SeccompFilter lFilter;
         lFilter.apply();
 
-        // Attempt execve() — this is NOT on the allowlist.
-        // Pass a valid path so the attempt is genuine, not a path error.
-        // The seccomp filter fires BEFORE the kernel even looks at the path.
-        char* const lArgv[] = { nullptr };
-        char* const lEnvp[] = { nullptr };
-        ::execve("/bin/sh", lArgv, lEnvp);
+        // Attempt unshare() — this is NOT on the allowlist.
+        // The seccomp filter fires BEFORE the kernel processes the flags.
+        ::unshare(CLONE_NEWUSER);
 
-        // If we reach here, execve() was NOT blocked — test failure.
+        // If we reach here, unshare() was NOT blocked — test failure.
         std::exit(EXIT_FAILURE);
     });
 
@@ -200,7 +206,7 @@ static bool testBlockedExecve()
     bool lBKilledBySigsys = WIFSIGNALED(lIWstatus)
                          && (WTERMSIG(lIWstatus) == SIGSYS);
 
-    printResult("execve() is blocked (killed by SIGSYS)", lBKilledBySigsys);
+    printResult("unshare() is blocked (killed by SIGSYS)", lBKilledBySigsys);
     return lBKilledBySigsys;
 }
 
@@ -260,7 +266,7 @@ int main()
 
     lBAllPassed &= testAllowedSyscall();
     lBAllPassed &= testBlockedSocket();
-    lBAllPassed &= testBlockedExecve();
+    lBAllPassed &= testBlockedUnshare();
     lBAllPassed &= testParentObservation();
 
     std::printf("\n============================================================\n");
