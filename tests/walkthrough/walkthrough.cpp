@@ -34,8 +34,7 @@
 #include <astra/core/event_bus.h>
 #include <astra/core/hook.h>
 #include <astra/core/process.h>
-#include <astra/core/service.h>
-#include <astra/core/service_registry.h>
+#include <astra/core/service.h>   // IService, ServiceRegistry both live here
 #include <astra/ipc/ChannelFactory.hpp>
 #include <astra/ipc/RingBuffer.hpp>
 #include <astra/isolation/profile_engine.h>
