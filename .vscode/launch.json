@@ -1,0 +1,180 @@
+{
+    // ============================================================================
+    // Astra Runtime — VS Code debugger launch configurations
+    //
+    // Designed for Linux x86_64 + gdb (the only platform Astra builds on).
+    // For macOS development hosts: use Remote-SSH into the Fedora box first,
+    // then open this workspace there.
+    //
+    // Pre-flight (one-time):
+    //   1. Install the "C/C++" extension by Microsoft (ms-vscode.cpptools)
+    //   2. Build the walkthrough: `./scripts/compile-astra.sh`
+    //
+    // Then click the "Run and Debug" sidebar icon (Ctrl+Shift+D), pick a
+    // config below, set breakpoints in tests/walkthrough/walkthrough.cpp
+    // or any src/ file, and press F5.
+    // ============================================================================
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Astra Walkthrough (all sections, paused)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/walkthrough/astra_walkthrough",
+            "args": ["--pause"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "preLaunchTask": "build-walkthrough",
+            "setupCommands": [
+                { "description": "Enable pretty-printing", "text": "-enable-pretty-printing", "ignoreFailures": true },
+                { "description": "Skip libc/libstdc++ steps", "text": "skip -gfi /usr/include/*", "ignoreFailures": true }
+            ]
+        },
+        {
+            "name": "Astra Walkthrough — Section 1 (M-21 NASM)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/walkthrough/astra_walkthrough",
+            "args": ["--only", "1"],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "build-walkthrough",
+            "setupCommands": [
+                { "text": "-enable-pretty-printing", "ignoreFailures": true },
+                { "text": "break demo_m21_asm_primitives" }
+            ]
+        },
+        {
+            "name": "Astra Walkthrough — Section 2 (M-01 Capability)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/walkthrough/astra_walkthrough",
+            "args": ["--only", "2"],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "build-walkthrough",
+            "setupCommands": [
+                { "text": "-enable-pretty-printing", "ignoreFailures": true },
+                { "text": "break demo_m01_capability_create" },
+                { "text": "break demo_m01_capability_derive" },
+                { "text": "break demo_m01_capability_validate" },
+                { "text": "break demo_m01_capability_revoke" },
+                { "text": "break astra::core::CapabilityManager::validate" },
+                { "text": "break astra::core::CapabilityManager::revoke" }
+            ]
+        },
+        {
+            "name": "Astra Walkthrough — Section 3 (EventBus)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/walkthrough/astra_walkthrough",
+            "args": ["--only", "3"],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "build-walkthrough",
+            "setupCommands": [
+                { "text": "-enable-pretty-printing", "ignoreFailures": true },
+                { "text": "break demo_m01_event_bus" },
+                { "text": "break astra::core::EventBus::publish" },
+                { "text": "break astra::core::EventBus::dispatch" }
+            ]
+        },
+        {
+            "name": "Astra Walkthrough — Section 4 (ServiceRegistry)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/walkthrough/astra_walkthrough",
+            "args": ["--only", "4"],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "build-walkthrough",
+            "setupCommands": [
+                { "text": "-enable-pretty-printing", "ignoreFailures": true },
+                { "text": "break demo_m01_service_registry" },
+                { "text": "break WalkthroughService::onInit" },
+                { "text": "break WalkthroughService::onStart" },
+                { "text": "break astra::core::ServiceRegistry::startAll" },
+                { "text": "break astra::core::ServiceRegistry::topologicalSort" }
+            ]
+        },
+        {
+            "name": "Astra Walkthrough — Section 5 (HookRegistry)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/walkthrough/astra_walkthrough",
+            "args": ["--only", "5"],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "build-walkthrough",
+            "setupCommands": [
+                { "text": "-enable-pretty-printing", "ignoreFailures": true },
+                { "text": "break demo_m01_hook_registry" },
+                { "text": "break astra::core::HookRegistry::execute" },
+                { "text": "break astra::core::HookChain::execute" }
+            ]
+        },
+        {
+            "name": "Astra Walkthrough — Section 7+8 (M-03 IPC raw + gated)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/walkthrough/astra_walkthrough",
+            "args": ["--only", "8"],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "build-walkthrough",
+            "setupCommands": [
+                { "text": "-enable-pretty-printing", "ignoreFailures": true },
+                { "text": "break demo_m03_ipc_capability_gate" },
+                { "text": "break astra::ipc::RingBuffer::writeGated" },
+                { "text": "break astra::ipc::RingBuffer::readGated" },
+                { "text": "break astra::ipc::RingBuffer::write" },
+                { "text": "break astra::core::CapabilityManager::validate" }
+            ]
+        },
+        {
+            "name": "Astra Walkthrough — Section 9 (Paper-1 integration)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/walkthrough/astra_walkthrough",
+            "args": ["--only", "9", "--pause"],
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "build-walkthrough",
+            "setupCommands": [
+                { "text": "-enable-pretty-printing", "ignoreFailures": true },
+                { "text": "break demo_integration_paper1_path" }
+            ]
+        },
+        {
+            "name": "Attach to running astra_walkthrough",
+            "type": "cppdbg",
+            "request": "attach",
+            "program": "${workspaceFolder}/build/tests/walkthrough/astra_walkthrough",
+            "MIMode": "gdb"
+        },
+        {
+            "name": "Run any ctest binary by name (prompted)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/tests/${input:testArea}/${input:testBinary}",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "preLaunchTask": "build-all-tests"
+        }
+    ],
+    "inputs": [
+        {
+            "id": "testArea",
+            "type": "promptString",
+            "description": "Test subdirectory (e.g. core, isolation, ipc, allocator, ebpf, asm_core)"
+        },
+        {
+            "id": "testBinary",
+            "type": "promptString",
+            "description": "Test binary filename (e.g. test_capability, test_sprint1, test_ipc_sprint5_cap_gate)"
+        }
+    ]
+}

@@ -43,7 +43,12 @@ compile_commands.json
 !papers/**/Makefile
 
 # IDE and editor files
-.vscode/
+# .vscode/ is normally gitignored, BUT we ship .vscode/launch.json and
+# .vscode/tasks.json (the walkthrough + ctest debugger configs) — those
+# are tracked explicitly below. Any other .vscode/* files stay ignored.
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 .idea/
 *.swp
 *.swo

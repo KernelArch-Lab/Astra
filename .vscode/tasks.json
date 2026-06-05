@@ -1,0 +1,67 @@
+{
+    // ============================================================================
+    // Astra Runtime — VS Code build tasks
+    //
+    // These tasks are referenced by launch.json's preLaunchTask field so
+    // the binary is rebuilt before each F5 run. They wrap the project's
+    // single-entry build driver (scripts/compile-astra.sh).
+    // ============================================================================
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build-walkthrough",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/compile-astra.sh",
+            "args": ["--skip-tests"],
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "presentation": {
+                "echo": true,
+                "reveal": "silent",
+                "focus": false,
+                "panel": "dedicated",
+                "clear": false
+            }
+        },
+        {
+            "label": "build-all-tests",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/compile-astra.sh",
+            "args": ["--skip-tests"],
+            "group": "build",
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "run-ctest-all",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/compile-astra.sh",
+            "group": "test",
+            "problemMatcher": []
+        },
+        {
+            "label": "run-ctest-failed",
+            "type": "shell",
+            "command": "ctest",
+            "args": ["--test-dir", "${workspaceFolder}/build",
+                     "--output-on-failure", "--rerun-failed"],
+            "group": "test",
+            "problemMatcher": []
+        },
+        {
+            "label": "clean-build",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/compile-astra.sh",
+            "args": ["clean"],
+            "problemMatcher": []
+        },
+        {
+            "label": "cbmc-verify",
+            "type": "shell",
+            "command": "${workspaceFolder}/scripts/compile-astra.sh",
+            "args": ["cbmc"],
+            "problemMatcher": []
+        }
+    ]
+}
