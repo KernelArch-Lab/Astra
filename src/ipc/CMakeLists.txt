@@ -4,7 +4,10 @@
 # ============================================================================
 
 add_library(astra_ipc STATIC
+    BroadcastRing.cpp
     ChannelFactory.cpp
+    ChannelKey.cpp
+    LatencyTracker.cpp
     RingBuffer.cpp
 )
 
@@ -16,6 +19,7 @@ target_include_directories(astra_ipc
 target_link_libraries(astra_ipc
     PUBLIC
         astra_core
+        astra_asm_core
 )
 
 message(STATUS "  [M-03] astra_ipc library configured")

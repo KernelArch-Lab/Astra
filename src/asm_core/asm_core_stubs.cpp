@@ -231,6 +231,345 @@ extern "C" std::uint64_t asm_stack_canary_init(void)
 
 
 // ============================================================================
+// SHA-256 implementation (FIPS 180-4)
+//
+// This is a correct pure-C++ reference implementation.  It is NOT
+// constant-time against cache-timing attacks.  The NASM port (M-21 Phase 2)
+// will replace it with a constant-time, AES-NI-accelerated version.
+// ============================================================================
+
+namespace
+{
+
+// SHA-256 initial hash values (fractional parts of sqrt of first 8 primes)
+static const std::uint32_t SHA256_INIT[8] = {
+    0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+    0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u
+};
+
+// SHA-256 round constants (fractional parts of cbrt of first 64 primes)
+static const std::uint32_t SHA256_K[64] = {
+    0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u,
+    0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
+    0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u,
+    0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,
+    0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu,
+    0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+    0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u,
+    0xc6e00bf3u, 0xd5a79147u, 0x06ca6351u, 0x14292967u,
+    0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u,
+    0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
+    0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u,
+    0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+    0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u,
+    0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu, 0x682e6ff3u,
+    0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u,
+    0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u
+};
+
+static inline std::uint32_t rotr32(std::uint32_t x, unsigned n) noexcept
+{
+    return (x >> n) | (x << (32u - n));
+}
+
+static inline std::uint32_t sha256_ch(std::uint32_t x,
+                                       std::uint32_t y,
+                                       std::uint32_t z) noexcept
+{
+    return (x & y) ^ (~x & z);
+}
+
+static inline std::uint32_t sha256_maj(std::uint32_t x,
+                                        std::uint32_t y,
+                                        std::uint32_t z) noexcept
+{
+    return (x & y) ^ (x & z) ^ (y & z);
+}
+
+static inline std::uint32_t sha256_ep0(std::uint32_t x) noexcept
+{
+    return rotr32(x, 2) ^ rotr32(x, 13) ^ rotr32(x, 22);
+}
+
+static inline std::uint32_t sha256_ep1(std::uint32_t x) noexcept
+{
+    return rotr32(x, 6) ^ rotr32(x, 11) ^ rotr32(x, 25);
+}
+
+static inline std::uint32_t sha256_sig0(std::uint32_t x) noexcept
+{
+    return rotr32(x, 7) ^ rotr32(x, 18) ^ (x >> 3);
+}
+
+static inline std::uint32_t sha256_sig1(std::uint32_t x) noexcept
+{
+    return rotr32(x, 17) ^ rotr32(x, 19) ^ (x >> 10);
+}
+
+// Process one 64-byte block, updating state in-place.
+static void sha256_process_block(std::uint32_t aState[8],
+                                  const std::uint8_t aBlock[64]) noexcept
+{
+    std::uint32_t W[64];
+
+    // Load block as 16 big-endian uint32s
+    for (int i = 0; i < 16; ++i)
+    {
+        W[i] = (static_cast<std::uint32_t>(aBlock[i * 4 + 0]) << 24)
+             | (static_cast<std::uint32_t>(aBlock[i * 4 + 1]) << 16)
+             | (static_cast<std::uint32_t>(aBlock[i * 4 + 2]) <<  8)
+             | (static_cast<std::uint32_t>(aBlock[i * 4 + 3])      );
+    }
+
+    // Extend message schedule to 64 words
+    for (int i = 16; i < 64; ++i)
+    {
+        W[i] = sha256_sig1(W[i - 2])  + W[i - 7]
+             + sha256_sig0(W[i - 15]) + W[i - 16];
+    }
+
+    // Initialize working variables from current state
+    std::uint32_t a = aState[0], b = aState[1];
+    std::uint32_t c = aState[2], d = aState[3];
+    std::uint32_t e = aState[4], f = aState[5];
+    std::uint32_t g = aState[6], h = aState[7];
+
+    // 64 compression rounds
+    for (int i = 0; i < 64; ++i)
+    {
+        const std::uint32_t T1 = h + sha256_ep1(e) + sha256_ch(e, f, g)
+                                + SHA256_K[i] + W[i];
+        const std::uint32_t T2 = sha256_ep0(a) + sha256_maj(a, b, c);
+        h = g; g = f; f = e; e = d + T1;
+        d = c; c = b; b = a; a = T1 + T2;
+    }
+
+    aState[0] += a; aState[1] += b; aState[2] += c; aState[3] += d;
+    aState[4] += e; aState[5] += f; aState[6] += g; aState[7] += h;
+}
+
+} // anonymous namespace
+
+// ============================================================================
+// SHA-256 public API
+// ============================================================================
+
+extern "C" void asm_sha256_init(Sha256Context* aCtx)
+{
+    for (int i = 0; i < 8; ++i)
+        aCtx->m_state[i] = SHA256_INIT[i];
+    aCtx->m_bufLen   = 0;
+    aCtx->m_totalLen = 0;
+}
+
+extern "C" void asm_sha256_update(Sha256Context* aCtx,
+                                   const void*    aData,
+                                   std::size_t    aLen)
+{
+    if (aData == nullptr || aLen == 0)
+        return;
+
+    const auto* lP = static_cast<const std::uint8_t*>(aData);
+
+    while (aLen > 0)
+    {
+        const std::uint32_t lUSpace = 64u - aCtx->m_bufLen;
+        const std::uint32_t lUTake = static_cast<std::uint32_t>(
+            aLen < lUSpace ? aLen : lUSpace
+        );
+
+        std::memcpy(aCtx->m_buf + aCtx->m_bufLen, lP, lUTake);
+        aCtx->m_bufLen   += lUTake;
+        aCtx->m_totalLen += lUTake;
+        lP               += lUTake;
+        aLen             -= lUTake;
+
+        if (aCtx->m_bufLen == 64u)
+        {
+            sha256_process_block(aCtx->m_state, aCtx->m_buf);
+            aCtx->m_bufLen = 0;
+        }
+    }
+}
+
+extern "C" void asm_sha256_final(Sha256Context* aCtx, std::uint8_t aOut[32])
+{
+    // Append 0x80 padding byte
+    aCtx->m_buf[aCtx->m_bufLen++] = 0x80u;
+
+    // If no room for 8-byte length field, flush and start a new block
+    if (aCtx->m_bufLen > 56u)
+    {
+        while (aCtx->m_bufLen < 64u)
+            aCtx->m_buf[aCtx->m_bufLen++] = 0u;
+        sha256_process_block(aCtx->m_state, aCtx->m_buf);
+        aCtx->m_bufLen = 0;
+    }
+
+    // Zero-pad up to byte 56
+    while (aCtx->m_bufLen < 56u)
+        aCtx->m_buf[aCtx->m_bufLen++] = 0u;
+
+    // Append message bit-length as big-endian uint64
+    const std::uint64_t lUBits = aCtx->m_totalLen * 8u;
+    aCtx->m_buf[56] = static_cast<std::uint8_t>(lUBits >> 56);
+    aCtx->m_buf[57] = static_cast<std::uint8_t>(lUBits >> 48);
+    aCtx->m_buf[58] = static_cast<std::uint8_t>(lUBits >> 40);
+    aCtx->m_buf[59] = static_cast<std::uint8_t>(lUBits >> 32);
+    aCtx->m_buf[60] = static_cast<std::uint8_t>(lUBits >> 24);
+    aCtx->m_buf[61] = static_cast<std::uint8_t>(lUBits >> 16);
+    aCtx->m_buf[62] = static_cast<std::uint8_t>(lUBits >>  8);
+    aCtx->m_buf[63] = static_cast<std::uint8_t>(lUBits       );
+
+    sha256_process_block(aCtx->m_state, aCtx->m_buf);
+
+    // Serialize state as big-endian bytes
+    for (int i = 0; i < 8; ++i)
+    {
+        aOut[i * 4 + 0] = static_cast<std::uint8_t>(aCtx->m_state[i] >> 24);
+        aOut[i * 4 + 1] = static_cast<std::uint8_t>(aCtx->m_state[i] >> 16);
+        aOut[i * 4 + 2] = static_cast<std::uint8_t>(aCtx->m_state[i] >>  8);
+        aOut[i * 4 + 3] = static_cast<std::uint8_t>(aCtx->m_state[i]       );
+    }
+
+    asm_secure_wipe(aCtx, sizeof(Sha256Context));
+}
+
+extern "C" void asm_sha256(const void* aData, std::size_t aLen,
+                            std::uint8_t aOut[32])
+{
+    Sha256Context lCtx;
+    asm_sha256_init(&lCtx);
+    asm_sha256_update(&lCtx, aData, aLen);
+    asm_sha256_final(&lCtx, aOut);
+}
+
+// ============================================================================
+// HMAC-SHA256 public API  (RFC 2104)
+//
+// HMAC(K, m) = SHA256( (K' XOR opad) || SHA256( (K' XOR ipad) || m ) )
+//   ipad = 0x36 repeated 64 times
+//   opad = 0x5C repeated 64 times
+//   K'   = SHA256(K) if |K| > 64, else K zero-padded to 64 bytes
+// ============================================================================
+
+extern "C" void asm_hmac_sha256_init(HmacSha256Context* aCtx,
+                                      const void*        aKey,
+                                      std::size_t        aKLen)
+{
+    std::uint8_t lKPrime[64] = {};
+
+    if (aKLen > 64u)
+    {
+        // Hash the key down to 32 bytes
+        asm_sha256(aKey, aKLen, lKPrime);
+    }
+    else
+    {
+        std::memcpy(lKPrime, aKey, aKLen);
+    }
+
+    std::uint8_t lInnerKey[64];
+    std::uint8_t lOuterKey[64];
+    for (int i = 0; i < 64; ++i)
+    {
+        lInnerKey[i] = static_cast<std::uint8_t>(lKPrime[i] ^ 0x36u);
+        lOuterKey[i] = static_cast<std::uint8_t>(lKPrime[i] ^ 0x5cu);
+    }
+
+    asm_sha256_init(&aCtx->m_inner);
+    asm_sha256_update(&aCtx->m_inner, lInnerKey, 64u);
+
+    asm_sha256_init(&aCtx->m_outer);
+    asm_sha256_update(&aCtx->m_outer, lOuterKey, 64u);
+
+    asm_secure_wipe(lKPrime,   sizeof(lKPrime));
+    asm_secure_wipe(lInnerKey, sizeof(lInnerKey));
+    asm_secure_wipe(lOuterKey, sizeof(lOuterKey));
+}
+
+extern "C" void asm_hmac_sha256_update(HmacSha256Context* aCtx,
+                                        const void*        aData,
+                                        std::size_t        aLen)
+{
+    asm_sha256_update(&aCtx->m_inner, aData, aLen);
+}
+
+extern "C" void asm_hmac_sha256_final(HmacSha256Context* aCtx,
+                                       std::uint8_t       aOut[32])
+{
+    std::uint8_t lInnerHash[32];
+    asm_sha256_final(&aCtx->m_inner, lInnerHash);
+
+    asm_sha256_update(&aCtx->m_outer, lInnerHash, 32u);
+    asm_sha256_final(&aCtx->m_outer, aOut);
+
+    asm_secure_wipe(lInnerHash, sizeof(lInnerHash));
+}
+
+extern "C" void asm_hmac_sha256(const void* aKey,  std::size_t aKLen,
+                                 const void* aData, std::size_t aDLen,
+                                 std::uint8_t aOut[32])
+{
+    HmacSha256Context lCtx;
+    asm_hmac_sha256_init(&lCtx, aKey, aKLen);
+    asm_hmac_sha256_update(&lCtx, aData, aDLen);
+    asm_hmac_sha256_final(&lCtx, aOut);
+}
+
+// ============================================================================
+// HKDF-SHA256  (RFC 5869)
+//
+// Extract: PRK = HMAC-SHA256(salt, IKM)
+// Expand:  OKM = T(1) || T(2) || ...  truncated to aOutLen bytes
+//          T(i) = HMAC-SHA256(PRK, T(i-1) || info || counter_byte(i))
+// ============================================================================
+
+extern "C" void asm_hkdf_sha256_extract(
+    const void*  aSalt,    std::size_t aSaltLen,
+    const void*  aIkm,     std::size_t aIkmLen,
+    std::uint8_t aPrkOut[32])
+{
+    // PRK = HMAC-SHA256(salt, IKM)
+    asm_hmac_sha256(aSalt, aSaltLen, aIkm, aIkmLen, aPrkOut);
+}
+
+extern "C" void asm_hkdf_sha256_expand(
+    const std::uint8_t aPrk[32],
+    const void*        aInfo,    std::size_t aInfoLen,
+    std::uint8_t*      aOut,
+    std::size_t        aOutLen)
+{
+    if (aOutLen == 0u)
+        return;
+
+    const std::size_t lUBlocks = (aOutLen + 31u) / 32u;
+    std::uint8_t      lPrev[32] = {};
+    bool              lBHasPrev = false;
+
+    for (std::size_t i = 1u; i <= lUBlocks; ++i)
+    {
+        HmacSha256Context lCtx;
+        asm_hmac_sha256_init(&lCtx, aPrk, 32u);
+        if (lBHasPrev)
+            asm_hmac_sha256_update(&lCtx, lPrev, 32u);
+        if (aInfoLen > 0u)
+            asm_hmac_sha256_update(&lCtx, aInfo, aInfoLen);
+        const std::uint8_t lUCounter = static_cast<std::uint8_t>(i);
+        asm_hmac_sha256_update(&lCtx, &lUCounter, 1u);
+        asm_hmac_sha256_final(&lCtx, lPrev);
+        lBHasPrev = true;
+
+        const std::size_t lUOffset = (i - 1u) * 32u;
+        const std::size_t lUCopy  = std::min(static_cast<std::size_t>(32u),
+                                              aOutLen - lUOffset);
+        std::memcpy(aOut + lUOffset, lPrev, lUCopy);
+    }
+
+    asm_secure_wipe(lPrev, sizeof(lPrev));
+}
+
+// ============================================================================
 // C++ wrapper: self-test
 // Verifies the basic stubs are functional. The real M-21 will have
 // much more thorough validation (timing analysis, KATs, etc.)

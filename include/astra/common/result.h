@@ -192,6 +192,8 @@ enum class ErrorCode : U32
     CFI_VIOLATION           = 56,
     SANDBOX_ESCAPE_ATTEMPT  = 57,
     ANOMALY_DETECTED        = 58,
+    REPLAY_DETECTED         = 59,
+    CHANNEL_REVOKED         = 60,
 
     // Platform errors (90-99)
     SYSCALL_FAILED          = 90,

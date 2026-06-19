@@ -11,6 +11,7 @@
 #define ASTRA_IPC_TYPES_HPP
 
 #include <astra/common/types.h>
+#include <astra/core/capability.h>
 
 #include <array>
 #include <atomic>
@@ -22,7 +23,50 @@ namespace astra
 namespace ipc
 {
 
-inline constexpr SizeT CACHE_LINE_SIZE = 64;
+inline constexpr SizeT CACHE_LINE_SIZE  = 64;
+inline constexpr U32   HMAC_TAG_BYTES   = 32U;  // SHA-256 output size
+inline constexpr U32   HMAC_KEY_BYTES   = 32U;  // recommended key length
+
+// ---------------------------------------------------------------------------
+// HmacKey — caller-owned 32-byte symmetric key for authenticated IPC.
+// In Sprint 6, HKDF will derive one per channel automatically.
+// ---------------------------------------------------------------------------
+struct HmacKey
+{
+    std::array<U8, HMAC_KEY_BYTES> m_arrBytes {};
+
+    [[nodiscard]] bool isNull() const noexcept
+    {
+        for (auto b : m_arrBytes)
+            if (b != 0)
+                return false;
+        return true;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// HmacTag — 32-byte MAC tag appended after the payload in authenticated msgs.
+// ---------------------------------------------------------------------------
+struct HmacTag
+{
+    std::array<U8, HMAC_TAG_BYTES> m_arrBytes {};
+};
+
+// ---------------------------------------------------------------------------
+// CapabilityGate — Sprint 5: binds a CapabilityManager + token to a channel.
+// Pass to writeGated / readGated variants. A null gate always yields
+// PERMISSION_DENIED; an unrevoked token with IPC_SEND/IPC_RECV succeeds.
+// ---------------------------------------------------------------------------
+struct CapabilityGate
+{
+    astra::core::CapabilityManager* m_pManager = nullptr;
+    astra::core::CapabilityToken    m_token     = astra::core::CapabilityToken::null();
+
+    [[nodiscard]] bool isNull() const noexcept
+    {
+        return m_pManager == nullptr || !m_token.isValid();
+    }
+};
 
 struct alignas(CACHE_LINE_SIZE) ChannelControlLineWrite
 {
@@ -50,7 +94,13 @@ struct alignas(CACHE_LINE_SIZE) ChannelControlLineMeta
     U32 m_uControlBytes = 0;
     U32 m_uRingBufferBytes = 0;
     U32 m_uMappedBytes = 0;
-    std::array<std::byte, CACHE_LINE_SIZE - (4 * sizeof(U32))> m_arrPadding {};
+
+    // Sprint 10: monotone revocation epoch.  0 = active; >0 = revoked.
+    // Incremented by revokeChannel(); checked at the top of readChecked().
+    // One atomic store revokes the channel for all readers — O(1) global.
+    std::atomic<U32> m_uEpoch {0};
+
+    std::array<std::byte, CACHE_LINE_SIZE - (4 * sizeof(U32)) - sizeof(std::atomic<U32>)> m_arrPadding {};
 };
 
 struct alignas(CACHE_LINE_SIZE) ChannelControlBlock
@@ -62,6 +112,24 @@ struct alignas(CACHE_LINE_SIZE) ChannelControlBlock
 
 static_assert(sizeof(ChannelControlBlock) == 3 * CACHE_LINE_SIZE,
               "ChannelControlBlock must stay exactly 3 cache lines");
+
+// ---------------------------------------------------------------------------
+// ReaderCursor - Sprint 11: per-reader read position for BroadcastRing.
+//
+// Each reader in a multicast fan-out owns one ReaderCursor.  The cursor holds
+// a monotonically increasing byte offset into the shared ring (same scale as
+// ChannelControlLineWrite::m_uWriteIndex).  Padding fills the cache line so
+// that concurrent readers do not false-share with each other or with the
+// write cache line.
+// ---------------------------------------------------------------------------
+struct alignas(CACHE_LINE_SIZE) ReaderCursor
+{
+    std::atomic<U64> m_uReadIndex {0};
+    std::array<std::byte, CACHE_LINE_SIZE - sizeof(std::atomic<U64>)> m_arrPadding {};
+};
+
+static_assert(sizeof(ReaderCursor) == CACHE_LINE_SIZE,
+              "ReaderCursor must be exactly one cache line");
 
 } // namespace ipc
 } // namespace astra

@@ -14,6 +14,7 @@
 
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -277,6 +278,7 @@ Result<Channel> ChannelFactory::createChannel(
     lPControl->m_meta.m_uControlBytes = static_cast<U32>(sizeof(ChannelControlBlock));
     lPControl->m_meta.m_uRingBufferBytes = static_cast<U32>(aURingBufferBytes);
     lPControl->m_meta.m_uMappedBytes = static_cast<U32>(lUMappedBytes);
+    lPControl->m_meta.m_uEpoch.store(0U, std::memory_order_relaxed);
 
     std::memset(lChannel.ringBuffer(), 0, aURingBufferBytes);
 
@@ -310,6 +312,89 @@ Result<Channel> ChannelFactory::mapExistingChannel(
     }
 
     return mapOwnedFd(aUChannelId, UniqueFd(lIDupFd), aUMappedBytes);
+}
+
+Result<void> ChannelFactory::sendFd(int aSockFd, int aChannelFd) noexcept
+{
+    struct msghdr lMsg {};
+    struct iovec  lIov {};
+
+    char lDummy = '\0';
+    lIov.iov_base  = &lDummy;
+    lIov.iov_len   = 1;
+    lMsg.msg_iov    = &lIov;
+    lMsg.msg_iovlen = 1;
+
+    alignas(struct cmsghdr) char lCmsgBuf[CMSG_SPACE(sizeof(int))];
+    lMsg.msg_control    = lCmsgBuf;
+    lMsg.msg_controllen = sizeof(lCmsgBuf);
+
+    struct cmsghdr* lPCmsg = CMSG_FIRSTHDR(&lMsg);
+    lPCmsg->cmsg_len   = CMSG_LEN(sizeof(int));
+    lPCmsg->cmsg_level = SOL_SOCKET;
+    lPCmsg->cmsg_type  = SCM_RIGHTS;
+    std::memcpy(CMSG_DATA(lPCmsg), &aChannelFd, sizeof(int));
+
+    if (::sendmsg(aSockFd, &lMsg, 0) < 0)
+    {
+        return std::unexpected(makeErrnoError(ErrorCode::SYSCALL_FAILED, "sendmsg failed"));
+    }
+    return {};
+}
+
+Result<int> ChannelFactory::recvFd(int aSockFd) noexcept
+{
+    struct msghdr lMsg {};
+    struct iovec  lIov {};
+
+    char lDummy;
+    lIov.iov_base  = &lDummy;
+    lIov.iov_len   = 1;
+    lMsg.msg_iov    = &lIov;
+    lMsg.msg_iovlen = 1;
+
+    alignas(struct cmsghdr) char lCmsgBuf[CMSG_SPACE(sizeof(int))];
+    lMsg.msg_control    = lCmsgBuf;
+    lMsg.msg_controllen = sizeof(lCmsgBuf);
+
+    if (::recvmsg(aSockFd, &lMsg, MSG_CMSG_CLOEXEC) < 0)
+    {
+        return std::unexpected(makeErrnoError(ErrorCode::SYSCALL_FAILED, "recvmsg failed"));
+    }
+
+    struct cmsghdr* lPCmsg = CMSG_FIRSTHDR(&lMsg);
+    if (!lPCmsg
+        || lPCmsg->cmsg_level != SOL_SOCKET
+        || lPCmsg->cmsg_type  != SCM_RIGHTS
+        || lPCmsg->cmsg_len   != CMSG_LEN(sizeof(int)))
+    {
+        return std::unexpected(makeError(
+            ErrorCode::INVALID_ARGUMENT,
+            ErrorCategory::IPC,
+            "recvmsg: missing or malformed SCM_RIGHTS control message"
+        ));
+    }
+
+    int lIReceivedFd = -1;
+    std::memcpy(&lIReceivedFd, CMSG_DATA(lPCmsg), sizeof(int));
+    return lIReceivedFd;
+}
+
+Result<Channel> ChannelFactory::mapReceivedChannel(
+    ChannelId aUChannelId,
+    int       aIFd,
+    SizeT     aUMappedBytes
+) const
+{
+    if (aIFd < 0)
+    {
+        return std::unexpected(makeError(
+            ErrorCode::INVALID_ARGUMENT,
+            ErrorCategory::IPC,
+            "Cannot map channel from invalid fd"
+        ));
+    }
+    return mapOwnedFd(aUChannelId, UniqueFd(aIFd), aUMappedBytes);
 }
 
 Result<Channel> ChannelFactory::mapOwnedFd(

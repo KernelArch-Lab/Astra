@@ -91,6 +91,77 @@ void asm_cache_flush_range(const void* aPAddr, std::size_t aULen);
 // -------------------------------------------------------------------------
 std::uint64_t asm_stack_canary_init(void);
 
+// -------------------------------------------------------------------------
+// SHA-256 streaming context.
+// Treat as opaque — field layout may change when NASM ports land.
+// -------------------------------------------------------------------------
+struct Sha256Context
+{
+    std::uint32_t m_state[8];   // current hash state (H0-H7)
+    std::uint8_t  m_buf[64];    // partial block buffer
+    std::uint32_t m_bufLen;     // bytes currently in m_buf
+    std::uint64_t m_totalLen;   // total bytes fed so far
+};
+
+// -------------------------------------------------------------------------
+// HMAC-SHA256 streaming context.
+// Holds two Sha256Context instances (inner and outer hash).
+// -------------------------------------------------------------------------
+struct HmacSha256Context
+{
+    Sha256Context m_inner;
+    Sha256Context m_outer;
+};
+
+// -------------------------------------------------------------------------
+// SHA-256  (FIPS 180-4)
+// -------------------------------------------------------------------------
+void asm_sha256_init  (Sha256Context* aCtx);
+void asm_sha256_update(Sha256Context* aCtx, const void* aData, std::size_t aLen);
+void asm_sha256_final (Sha256Context* aCtx, std::uint8_t aOut[32]);
+
+// One-shot convenience: computes SHA-256(aData[0..aLen-1]) into aOut[32].
+void asm_sha256(const void* aData, std::size_t aLen, std::uint8_t aOut[32]);
+
+// -------------------------------------------------------------------------
+// HMAC-SHA256  (RFC 2104)
+// -------------------------------------------------------------------------
+void asm_hmac_sha256_init  (HmacSha256Context* aCtx,
+                             const void* aKey, std::size_t aKLen);
+void asm_hmac_sha256_update(HmacSha256Context* aCtx,
+                             const void* aData, std::size_t aLen);
+void asm_hmac_sha256_final (HmacSha256Context* aCtx, std::uint8_t aOut[32]);
+
+// One-shot convenience: computes HMAC-SHA256(key, data) into aOut[32].
+void asm_hmac_sha256(const void* aKey, std::size_t aKLen,
+                     const void* aData, std::size_t aDLen,
+                     std::uint8_t aOut[32]);
+
+// -------------------------------------------------------------------------
+// HKDF-SHA256  (RFC 5869)
+//
+// Extract step:
+//   PRK = HMAC-SHA256(salt, IKM)
+//   aPrkOut must be exactly 32 bytes.
+//
+// Expand step:
+//   OKM = T(1) || T(2) || ...  truncated to aOutLen bytes
+//   T(i) = HMAC-SHA256(PRK, T(i-1) || info || i)  where T(0) = ""
+//   aOutLen must be <= 255 * 32 bytes (RFC 5869 constraint).
+// -------------------------------------------------------------------------
+void asm_hkdf_sha256_extract(
+    const void*  aSalt,    std::size_t aSaltLen,
+    const void*  aIkm,     std::size_t aIkmLen,
+    std::uint8_t aPrkOut[32]
+);
+
+void asm_hkdf_sha256_expand(
+    const std::uint8_t aPrk[32],
+    const void*        aInfo,    std::size_t aInfoLen,
+    std::uint8_t*      aOut,
+    std::size_t        aOutLen
+);
+
 } // extern "C"
 
 // -------------------------------------------------------------------------

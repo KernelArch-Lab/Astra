@@ -2,10 +2,12 @@
 // Astra Runtime - M-03 Channel Factory
 // include/astra/ipc/ChannelFactory.hpp
 //
-// Sprint 1 deliverable from the IPC module brief:
-//   - allocate a channel with memfd_create + ftruncate + mmap(MAP_SHARED)
-//   - initialise the shared control structure
-//   - allow another process to map the same memfd and observe shared bytes
+// Sprint 1: allocate a channel with memfd_create + ftruncate + mmap(MAP_SHARED)
+//           initialise the shared control structure; allow another mapping.
+//
+// Sprint 7: pass a channel memfd across process boundaries via SCM_RIGHTS
+//           (sendmsg / recvmsg over a Unix domain socket) so two unrelated
+//           processes can share a ring buffer without forking.
 // ============================================================================
 #ifndef ASTRA_IPC_CHANNEL_FACTORY_HPP
 #define ASTRA_IPC_CHANNEL_FACTORY_HPP
@@ -87,6 +89,31 @@ public:
     ) const;
 
     [[nodiscard]] Result<Channel> mapExistingChannel(
+        ChannelId aUChannelId,
+        int       aIFd,
+        SizeT     aUMappedBytes
+    ) const;
+
+    // -----------------------------------------------------------------------
+    // Sprint 7 - SCM_RIGHTS memfd passing
+    //
+    // sendFd      : transmit aChannelFd over aSockFd using SCM_RIGHTS.
+    //               The kernel dups the fd into the receiver's table; the
+    //               sender's fd is unaffected.
+    //
+    // recvFd      : receive one fd from aSockFd.  The returned int is a brand-
+    //               new fd owned by the caller (marked CLOEXEC).
+    //               Returns INVALID_ARGUMENT if the control message is absent
+    //               or malformed.
+    //
+    // mapReceivedChannel : map a channel fd obtained via recvFd.  Takes
+    //               *ownership* of aIFd (no extra dup), so the caller must
+    //               not close it afterwards.
+    // -----------------------------------------------------------------------
+    [[nodiscard]] static Result<void> sendFd(int aSockFd, int aChannelFd) noexcept;
+    [[nodiscard]] static Result<int>  recvFd(int aSockFd) noexcept;
+
+    [[nodiscard]] Result<Channel> mapReceivedChannel(
         ChannelId aUChannelId,
         int       aIFd,
         SizeT     aUMappedBytes

@@ -17,6 +17,7 @@
 // ============================================================================
 
 #include <astra/ipc/RingBuffer.hpp>
+#include <astra/asm_core/asm_core.h>
 #include <astra/common/log.h>
 
 #include <algorithm>
@@ -129,6 +130,93 @@ bool RingBuffer::isEmpty() const noexcept
 bool RingBuffer::isFull(U32 aPayloadLen) const noexcept
 {
     return static_cast<U32>(sizeof(MessageHeader)) + aPayloadLen > freeBytes();
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 10 - revokeChannel / isRevoked / readChecked
+// ---------------------------------------------------------------------------
+
+void RingBuffer::revokeChannel() noexcept
+{
+    m_pControl->m_meta.m_uEpoch.fetch_add(1U, std::memory_order_release);
+
+    // Wake any threads blocked in readWait / readWaitVerify / readWaitGated
+    // so they can observe the revocation on their next readChecked() call.
+    m_pControl->m_write.m_uWriteIndex.notify_all();
+
+    ASTRA_LOG_WARN(LOG_TAG,
+        "revokeChannel: channel %u revoked (epoch=%u)",
+        m_pControl->m_meta.m_uChannelId,
+        m_pControl->m_meta.m_uEpoch.load(std::memory_order_relaxed));
+}
+
+bool RingBuffer::isRevoked() const noexcept
+{
+    return m_pControl->m_meta.m_uEpoch.load(std::memory_order_acquire) != 0U;
+}
+
+Result<U32> RingBuffer::readChecked(void* aBuf, U32 aBufLen) noexcept
+{
+    if (isRevoked())
+    {
+        return std::unexpected(makeError(
+            ErrorCode::CHANNEL_REVOKED,
+            ErrorCategory::IPC,
+            "readChecked: channel has been revoked"
+        ));
+    }
+    return read(aBuf, aBufLen);
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 9 - occupancy
+//
+// Byte fields come from atomic indices — a consistent snapshot even under
+// concurrent writers.  The header scan walks forward from read_idx to
+// write_idx, stepping by sizeof(MessageHeader) + m_uPayloadBytes per record.
+// The loop stops if the next step would exceed available bytes, keeping the
+// scan safe for any wire format (including HMAC channels where the 32-byte
+// tag sits after the payload and is not accounted for in m_uPayloadBytes).
+// ---------------------------------------------------------------------------
+
+RingOccupancy RingBuffer::occupancy() const noexcept
+{
+    const U64 lUWriteIdx = m_pControl->m_write.m_uWriteIndex
+                               .load(std::memory_order_acquire);
+    const U64 lUReadIdx  = m_pControl->m_read.m_uReadIndex
+                               .load(std::memory_order_acquire);
+    const U64 lUAvail    = lUWriteIdx - lUReadIdx;
+
+    RingOccupancy lSnap{};
+    lSnap.m_uTotalBytes = m_uRingBytes;
+    lSnap.m_uUsedBytes  = (lUAvail > static_cast<U64>(m_uRingBytes))
+                              ? m_uRingBytes
+                              : static_cast<U32>(lUAvail);
+
+    U64 lUScanIdx   = lUReadIdx;
+    U64 lURemaining = lUAvail;
+
+    while (lURemaining >= static_cast<U64>(sizeof(MessageHeader)))
+    {
+        MessageHeader lHdr{};
+        ringCopyOut(lUScanIdx, &lHdr, static_cast<U32>(sizeof(MessageHeader)));
+
+        const U64 lUStep = static_cast<U64>(sizeof(MessageHeader))
+                         + static_cast<U64>(lHdr.m_uPayloadBytes);
+
+        if (lUStep > lURemaining)
+            break;
+
+        if (lHdr.m_uSequenceNo == SKIP_SENTINEL_SEQ)
+            ++lSnap.m_uSkipCount;
+        else
+            ++lSnap.m_uMessageCount;
+
+        lUScanIdx   += lUStep;
+        lURemaining -= lUStep;
+    }
+
+    return lSnap;
 }
 
 // ---------------------------------------------------------------------------
@@ -471,6 +559,593 @@ Result<U32> RingBuffer::readWait(void* aBuf, U32 aBufLen) noexcept
         {
             return read(aBuf, aBufLen);
         }
+
+        m_pControl->m_write.m_uWriteIndex.wait(lUCurWrite, std::memory_order_acquire);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers — slot claim / commit (shared by write* methods)
+//
+// claimSlot uses the CAS (lock-free) path exclusively.  The wait-free
+// fetch_add path with SKIP sentinel is kept in write() for MPSC throughput;
+// authenticated writes are lower-frequency so CAS correctness > throughput.
+// ---------------------------------------------------------------------------
+
+Result<U64> RingBuffer::claimSlot(U32 aUTotal) noexcept
+{
+    U64 lUExpected = m_pControl->m_write.m_uWriteClaimIndex
+                         .load(std::memory_order_relaxed);
+
+    while (true)
+    {
+        const U64 lUReadIdx = m_pControl->m_read.m_uReadIndex
+                                  .load(std::memory_order_acquire);
+
+        if (lUExpected - lUReadIdx + static_cast<U64>(aUTotal)
+                > static_cast<U64>(m_uRingBytes))
+        {
+            return std::unexpected(makeError(
+                ErrorCode::RESOURCE_EXHAUSTED,
+                ErrorCategory::IPC,
+                "claimSlot: ring buffer full"
+            ));
+        }
+
+        if (m_pControl->m_write.m_uWriteClaimIndex
+                .compare_exchange_weak(lUExpected,
+                                       lUExpected + static_cast<U64>(aUTotal),
+                                       std::memory_order_acq_rel,
+                                       std::memory_order_relaxed))
+        {
+            return lUExpected;
+        }
+        // CAS failed: lUExpected refreshed by compare_exchange_weak — retry
+    }
+}
+
+void RingBuffer::commitSlot(U64 aClaimStart, U32 aUTotal) noexcept
+{
+    U64 lUExpected = aClaimStart;
+    while (!m_pControl->m_write.m_uWriteIndex
+                .compare_exchange_weak(lUExpected,
+                                       aClaimStart + static_cast<U64>(aUTotal),
+                                       std::memory_order_release,
+                                       std::memory_order_relaxed))
+    {
+        lUExpected = aClaimStart;
+        std::atomic_thread_fence(std::memory_order_acquire);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 4 - writeHmac
+//
+// Wire layout written to ring:
+//   [MessageHeader 8B][Payload NB][HmacTag 32B]
+//
+// HMAC domain (multi-part, no heap allocation):
+//   { channel_id U32, seq_no U32, payload_len U32 }  (12 bytes, native order)
+//   followed by the payload bytes.
+// ---------------------------------------------------------------------------
+
+Result<void> RingBuffer::writeHmac(const HmacKey& aKey,
+                                    const void*    aData,
+                                    U32            aPayloadLen) noexcept
+{
+    if (aKey.isNull())
+    {
+        return std::unexpected(makeError(
+            ErrorCode::INVALID_ARGUMENT,
+            ErrorCategory::IPC,
+            "writeHmac: null key is not permitted"
+        ));
+    }
+
+    if (aPayloadLen == 0U)
+    {
+        return std::unexpected(makeError(
+            ErrorCode::INVALID_ARGUMENT,
+            ErrorCategory::IPC,
+            "writeHmac: payload length must be greater than zero"
+        ));
+    }
+
+    // Check for arithmetic overflow before computing total
+    constexpr U32 lUOverhead = static_cast<U32>(sizeof(MessageHeader)) + HMAC_TAG_BYTES;
+    if (aPayloadLen > std::numeric_limits<U32>::max() - lUOverhead)
+    {
+        return std::unexpected(makeError(
+            ErrorCode::INVALID_ARGUMENT,
+            ErrorCategory::IPC,
+            "writeHmac: payload too large (would overflow ring index)"
+        ));
+    }
+
+    const U32 lUTotal  = lUOverhead + aPayloadLen;
+    const U32 lUSeq    = m_uNextSeq++;
+    const U32 lUChanId = m_pControl->m_meta.m_uChannelId;
+
+    // Compute HMAC before touching the ring so a failed ring claim
+    // never leaves a partial record with a dangling tag.
+    HmacTag lTag;
+    {
+        HmacSha256Context lCtx;
+        struct { U32 chanId; U32 seq; U32 payLen; } lDomain{lUChanId, lUSeq, aPayloadLen};
+
+        asm_hmac_sha256_init(&lCtx, aKey.m_arrBytes.data(), HMAC_KEY_BYTES);
+        asm_hmac_sha256_update(&lCtx, &lDomain, sizeof(lDomain));
+        asm_hmac_sha256_update(&lCtx, aData, aPayloadLen);
+        asm_hmac_sha256_final(&lCtx, lTag.m_arrBytes.data());
+    }
+
+    auto lClaim = claimSlot(lUTotal);
+    if (!lClaim)
+        return std::unexpected(lClaim.error());
+
+    const U64 lUClaimStart = *lClaim;
+
+    MessageHeader lHeader{};
+    lHeader.m_uPayloadBytes = aPayloadLen;
+    lHeader.m_uSequenceNo   = lUSeq;
+
+    ringCopyIn(lUClaimStart,
+               &lHeader,
+               static_cast<U32>(sizeof(MessageHeader)));
+
+    ringCopyIn(lUClaimStart + static_cast<U64>(sizeof(MessageHeader)),
+               aData,
+               aPayloadLen);
+
+    ringCopyIn(lUClaimStart + static_cast<U64>(sizeof(MessageHeader))
+                            + static_cast<U64>(aPayloadLen),
+               lTag.m_arrBytes.data(),
+               HMAC_TAG_BYTES);
+
+    commitSlot(lUClaimStart, lUTotal);
+
+    ASTRA_LOG_TRACE(LOG_TAG,
+        "writeHmac: seq=%u payload=%u bytes (channel %u)",
+        lUSeq, aPayloadLen, lUChanId);
+
+    return {};
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 4 - readVerify
+//
+// Reads [Header 8B][Payload NB][HmacTag 32B] from the ring.
+// Recomputes the expected HMAC and compares via constant-time asm_ct_compare.
+// On mismatch the message is consumed (ring advances) to prevent the channel
+// from stalling, but HMAC_VERIFICATION_FAIL is returned so the caller can
+// close the channel.
+// ---------------------------------------------------------------------------
+
+Result<U32> RingBuffer::readVerify(const HmacKey& aKey,
+                                    void*          aBuf,
+                                    U32            aBufLen) noexcept
+{
+    if (aKey.isNull())
+    {
+        return std::unexpected(makeError(
+            ErrorCode::INVALID_ARGUMENT,
+            ErrorCategory::IPC,
+            "readVerify: null key is not permitted"
+        ));
+    }
+
+    while (true)
+    {
+        const U64 lUWriteIdx = m_pControl->m_write.m_uWriteIndex
+                                   .load(std::memory_order_acquire);
+        const U64 lUReadIdx  = m_pControl->m_read.m_uReadIndex
+                                   .load(std::memory_order_relaxed);
+        const U64 lUAvail    = lUWriteIdx - lUReadIdx;
+
+        if (lUAvail < static_cast<U64>(sizeof(MessageHeader)))
+        {
+            return std::unexpected(makeError(
+                ErrorCode::NOT_FOUND,
+                ErrorCategory::IPC,
+                "readVerify: ring buffer is empty"
+            ));
+        }
+
+        MessageHeader lHeader{};
+        ringCopyOut(lUReadIdx, &lHeader, static_cast<U32>(sizeof(MessageHeader)));
+
+        // Transparently skip SKIP sentinel records left by the MPSC fast path
+        if (lHeader.m_uSequenceNo == SKIP_SENTINEL_SEQ)
+        {
+            const U64 lUSkipTotal = static_cast<U64>(sizeof(MessageHeader))
+                                  + static_cast<U64>(lHeader.m_uPayloadBytes);
+            m_pControl->m_read.m_uReadIndex
+                .store(lUReadIdx + lUSkipTotal, std::memory_order_release);
+            continue;
+        }
+
+        const U64 lUMsgTotal = static_cast<U64>(sizeof(MessageHeader))
+                             + static_cast<U64>(lHeader.m_uPayloadBytes)
+                             + static_cast<U64>(HMAC_TAG_BYTES);
+
+        if (lUAvail < lUMsgTotal)
+        {
+            return std::unexpected(makeError(
+                ErrorCode::PRECONDITION_FAILED,
+                ErrorCategory::IPC,
+                "readVerify: partial authenticated message in ring"
+            ));
+        }
+
+        if (aBufLen < lHeader.m_uPayloadBytes)
+        {
+            return std::unexpected(makeError(
+                ErrorCode::RESOURCE_EXHAUSTED,
+                ErrorCategory::IPC,
+                "readVerify: destination buffer too small for payload"
+            ));
+        }
+
+        // Copy payload into caller buffer
+        ringCopyOut(lUReadIdx + static_cast<U64>(sizeof(MessageHeader)),
+                    aBuf,
+                    lHeader.m_uPayloadBytes);
+
+        // Read the stored tag from the ring into a stack buffer
+        HmacTag lStoredTag;
+        ringCopyOut(lUReadIdx + static_cast<U64>(sizeof(MessageHeader))
+                              + static_cast<U64>(lHeader.m_uPayloadBytes),
+                    lStoredTag.m_arrBytes.data(),
+                    HMAC_TAG_BYTES);
+
+        // Recompute expected tag over {channel_id, seq, payload_len, payload}
+        HmacTag lExpectedTag;
+        {
+            HmacSha256Context lCtx;
+            const U32 lUChanId = m_pControl->m_meta.m_uChannelId;
+            struct { U32 chanId; U32 seq; U32 payLen; }
+                lDomain{lUChanId, lHeader.m_uSequenceNo, lHeader.m_uPayloadBytes};
+
+            asm_hmac_sha256_init(&lCtx, aKey.m_arrBytes.data(), HMAC_KEY_BYTES);
+            asm_hmac_sha256_update(&lCtx, &lDomain, sizeof(lDomain));
+            asm_hmac_sha256_update(&lCtx, aBuf, lHeader.m_uPayloadBytes);
+            asm_hmac_sha256_final(&lCtx, lExpectedTag.m_arrBytes.data());
+        }
+
+        // Always advance the read index (consume the record)
+        m_pControl->m_read.m_uReadIndex
+            .store(lUReadIdx + lUMsgTotal, std::memory_order_release);
+
+        // Constant-time tag comparison
+        const int lICmp = asm_ct_compare(
+            lStoredTag.m_arrBytes.data(),
+            lExpectedTag.m_arrBytes.data(),
+            HMAC_TAG_BYTES
+        );
+
+        if (lICmp != 0)
+        {
+            ASTRA_LOG_WARN(LOG_TAG,
+                "readVerify: HMAC mismatch on seq=%u (channel %u) — possible tampering",
+                lHeader.m_uSequenceNo,
+                m_pControl->m_meta.m_uChannelId);
+
+            return std::unexpected(makeError(
+                ErrorCode::HMAC_VERIFICATION_FAIL,
+                ErrorCategory::IPC,
+                "readVerify: HMAC tag mismatch — message integrity violated"
+            ));
+        }
+
+        ASTRA_LOG_TRACE(LOG_TAG,
+            "readVerify: seq=%u payload=%u bytes OK (channel %u)",
+            lHeader.m_uSequenceNo,
+            lHeader.m_uPayloadBytes,
+            m_pControl->m_meta.m_uChannelId);
+
+        return lHeader.m_uPayloadBytes;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 8 - readVerifySeq
+//
+// Like readVerify, but also validates that the message's sequence number
+// matches aInOutExpectedSeq (replay / out-of-order detection).
+//
+// Check order:
+//   1. HMAC tag  — constant-time compare; HMAC_VERIFICATION_FAIL if bad.
+//   2. Seq no    — exact match required;   REPLAY_DETECTED if wrong.
+//
+// In both failure cases the record is consumed so the channel never stalls.
+// On success aInOutExpectedSeq is incremented.  On failure it is unchanged.
+// ---------------------------------------------------------------------------
+
+Result<U32> RingBuffer::readVerifySeq(
+    const HmacKey& aKey,
+    void*          aBuf,
+    U32            aBufLen,
+    U32&           aInOutExpectedSeq
+) noexcept
+{
+    if (aKey.isNull())
+    {
+        return std::unexpected(makeError(
+            ErrorCode::INVALID_ARGUMENT,
+            ErrorCategory::IPC,
+            "readVerifySeq: null key is not permitted"
+        ));
+    }
+
+    while (true)
+    {
+        const U64 lUWriteIdx = m_pControl->m_write.m_uWriteIndex
+                                   .load(std::memory_order_acquire);
+        const U64 lUReadIdx  = m_pControl->m_read.m_uReadIndex
+                                   .load(std::memory_order_relaxed);
+        const U64 lUAvail    = lUWriteIdx - lUReadIdx;
+
+        if (lUAvail < static_cast<U64>(sizeof(MessageHeader)))
+        {
+            return std::unexpected(makeError(
+                ErrorCode::NOT_FOUND,
+                ErrorCategory::IPC,
+                "readVerifySeq: ring buffer is empty"
+            ));
+        }
+
+        MessageHeader lHeader{};
+        ringCopyOut(lUReadIdx, &lHeader, static_cast<U32>(sizeof(MessageHeader)));
+
+        // Silently skip SKIP sentinels — do NOT touch aInOutExpectedSeq
+        if (lHeader.m_uSequenceNo == SKIP_SENTINEL_SEQ)
+        {
+            const U64 lUSkipTotal = static_cast<U64>(sizeof(MessageHeader))
+                                  + static_cast<U64>(lHeader.m_uPayloadBytes);
+            m_pControl->m_read.m_uReadIndex
+                .store(lUReadIdx + lUSkipTotal, std::memory_order_release);
+            continue;
+        }
+
+        const U64 lUMsgTotal = static_cast<U64>(sizeof(MessageHeader))
+                             + static_cast<U64>(lHeader.m_uPayloadBytes)
+                             + static_cast<U64>(HMAC_TAG_BYTES);
+
+        if (lUAvail < lUMsgTotal)
+        {
+            return std::unexpected(makeError(
+                ErrorCode::PRECONDITION_FAILED,
+                ErrorCategory::IPC,
+                "readVerifySeq: partial authenticated message in ring"
+            ));
+        }
+
+        if (aBufLen < lHeader.m_uPayloadBytes)
+        {
+            return std::unexpected(makeError(
+                ErrorCode::RESOURCE_EXHAUSTED,
+                ErrorCategory::IPC,
+                "readVerifySeq: destination buffer too small for payload"
+            ));
+        }
+
+        // Copy payload into caller buffer
+        ringCopyOut(lUReadIdx + static_cast<U64>(sizeof(MessageHeader)),
+                    aBuf,
+                    lHeader.m_uPayloadBytes);
+
+        // Read the stored HMAC tag
+        HmacTag lStoredTag;
+        ringCopyOut(lUReadIdx + static_cast<U64>(sizeof(MessageHeader))
+                              + static_cast<U64>(lHeader.m_uPayloadBytes),
+                    lStoredTag.m_arrBytes.data(),
+                    HMAC_TAG_BYTES);
+
+        // Recompute expected tag
+        HmacTag lExpectedTag;
+        {
+            HmacSha256Context lCtx;
+            const U32 lUChanId = m_pControl->m_meta.m_uChannelId;
+            struct { U32 chanId; U32 seq; U32 payLen; }
+                lDomain{lUChanId, lHeader.m_uSequenceNo, lHeader.m_uPayloadBytes};
+
+            asm_hmac_sha256_init(&lCtx, aKey.m_arrBytes.data(), HMAC_KEY_BYTES);
+            asm_hmac_sha256_update(&lCtx, &lDomain, sizeof(lDomain));
+            asm_hmac_sha256_update(&lCtx, aBuf, lHeader.m_uPayloadBytes);
+            asm_hmac_sha256_final(&lCtx, lExpectedTag.m_arrBytes.data());
+        }
+
+        // Always consume (advance read index) before reporting errors
+        m_pControl->m_read.m_uReadIndex
+            .store(lUReadIdx + lUMsgTotal, std::memory_order_release);
+
+        // Check 1: HMAC integrity (constant-time)
+        const int lICmp = asm_ct_compare(
+            lStoredTag.m_arrBytes.data(),
+            lExpectedTag.m_arrBytes.data(),
+            HMAC_TAG_BYTES
+        );
+
+        if (lICmp != 0)
+        {
+            ASTRA_LOG_WARN(LOG_TAG,
+                "readVerifySeq: HMAC mismatch on seq=%u (channel %u)",
+                lHeader.m_uSequenceNo,
+                m_pControl->m_meta.m_uChannelId);
+
+            return std::unexpected(makeError(
+                ErrorCode::HMAC_VERIFICATION_FAIL,
+                ErrorCategory::IPC,
+                "readVerifySeq: HMAC tag mismatch — message integrity violated"
+            ));
+        }
+
+        // Check 2: Replay guard (sequence monotonicity)
+        if (lHeader.m_uSequenceNo != aInOutExpectedSeq)
+        {
+            ASTRA_LOG_WARN(LOG_TAG,
+                "readVerifySeq: replay detected — got seq=%u expected=%u (channel %u)",
+                lHeader.m_uSequenceNo,
+                aInOutExpectedSeq,
+                m_pControl->m_meta.m_uChannelId);
+
+            return std::unexpected(makeError(
+                ErrorCode::REPLAY_DETECTED,
+                ErrorCategory::IPC,
+                "readVerifySeq: sequence number mismatch — possible replay or reorder"
+            ));
+        }
+
+        ++aInOutExpectedSeq;
+
+        ASTRA_LOG_TRACE(LOG_TAG,
+            "readVerifySeq: seq=%u payload=%u bytes OK (channel %u)",
+            lHeader.m_uSequenceNo,
+            lHeader.m_uPayloadBytes,
+            m_pControl->m_meta.m_uChannelId);
+
+        return lHeader.m_uPayloadBytes;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 4 - writeNotifyHmac / readWaitVerify
+// ---------------------------------------------------------------------------
+
+Result<void> RingBuffer::writeNotifyHmac(const HmacKey& aKey,
+                                          const void*    aData,
+                                          U32            aPayloadLen) noexcept
+{
+    auto lResult = writeHmac(aKey, aData, aPayloadLen);
+    if (lResult.has_value())
+        m_pControl->m_write.m_uWriteIndex.notify_one();
+    return lResult;
+}
+
+Result<U32> RingBuffer::readWaitVerify(const HmacKey& aKey,
+                                        void*          aBuf,
+                                        U32            aBufLen) noexcept
+{
+    while (true)
+    {
+        const U64 lUCurWrite = m_pControl->m_write.m_uWriteIndex
+                                   .load(std::memory_order_acquire);
+        const U64 lUCurRead  = m_pControl->m_read.m_uReadIndex
+                                   .load(std::memory_order_relaxed);
+
+        if (lUCurWrite - lUCurRead >= static_cast<U64>(sizeof(MessageHeader)))
+            return readVerify(aKey, aBuf, aBufLen);
+
+        m_pControl->m_write.m_uWriteIndex.wait(lUCurWrite, std::memory_order_acquire);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 5 - Capability-gated write / read
+//
+// The gate check runs BEFORE any ring state is touched.  On failure the ring
+// is completely untouched — write_claim_index is not advanced, so there is
+// zero ring footprint for denied operations.
+//
+// Token re-validation in readWaitGated: after each futex wake the token is
+// re-checked so a revocation that races with a blocking read is caught within
+// one futex wakeup cycle.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// Shared guard: validate the gate and the required permission.
+// Returns an Error on failure, or an empty optional on success.
+[[nodiscard]] inline Result<void>
+checkGate(const astra::ipc::CapabilityGate& aGate,
+          astra::core::Permission            aERequired) noexcept
+{
+    if (aGate.isNull())
+    {
+        return std::unexpected(makeError(
+            ErrorCode::PERMISSION_DENIED,
+            ErrorCategory::IPC,
+            "capability gate is null (no manager or invalid token)"
+        ));
+    }
+
+    if (!aGate.m_pManager->validate(aGate.m_token, aERequired))
+    {
+        return std::unexpected(makeError(
+            ErrorCode::PERMISSION_DENIED,
+            ErrorCategory::IPC,
+            "capability token validation failed (revoked or missing permission)"
+        ));
+    }
+
+    return {};
+}
+
+} // anonymous namespace
+
+Result<void> RingBuffer::writeGated(const CapabilityGate& aGate,
+                                     const void*           aData,
+                                     U32                   aPayloadLen) noexcept
+{
+    if (auto lCheck = checkGate(aGate, astra::core::Permission::IPC_SEND);
+        !lCheck.has_value())
+    {
+        return lCheck;
+    }
+
+    return write(aData, aPayloadLen);
+}
+
+Result<U32> RingBuffer::readGated(const CapabilityGate& aGate,
+                                   void*                 aBuf,
+                                   U32                   aBufLen) noexcept
+{
+    if (auto lCheck = checkGate(aGate, astra::core::Permission::IPC_RECV);
+        !lCheck.has_value())
+    {
+        return std::unexpected(lCheck.error());
+    }
+
+    return read(aBuf, aBufLen);
+}
+
+Result<void> RingBuffer::writeNotifyGated(const CapabilityGate& aGate,
+                                           const void*           aData,
+                                           U32                   aPayloadLen) noexcept
+{
+    if (auto lCheck = checkGate(aGate, astra::core::Permission::IPC_SEND);
+        !lCheck.has_value())
+    {
+        return lCheck;
+    }
+
+    auto lResult = write(aData, aPayloadLen);
+    if (lResult.has_value())
+        m_pControl->m_write.m_uWriteIndex.notify_one();
+    return lResult;
+}
+
+Result<U32> RingBuffer::readWaitGated(const CapabilityGate& aGate,
+                                       void*                 aBuf,
+                                       U32                   aBufLen) noexcept
+{
+    while (true)
+    {
+        // Re-validate on every iteration — catches revocation during a wait
+        if (auto lCheck = checkGate(aGate, astra::core::Permission::IPC_RECV);
+            !lCheck.has_value())
+        {
+            return std::unexpected(lCheck.error());
+        }
+
+        const U64 lUCurWrite = m_pControl->m_write.m_uWriteIndex
+                                   .load(std::memory_order_acquire);
+        const U64 lUCurRead  = m_pControl->m_read.m_uReadIndex
+                                   .load(std::memory_order_relaxed);
+
+        if (lUCurWrite - lUCurRead >= static_cast<U64>(sizeof(MessageHeader)))
+            return read(aBuf, aBufLen);
 
         m_pControl->m_write.m_uWriteIndex.wait(lUCurWrite, std::memory_order_acquire);
     }
