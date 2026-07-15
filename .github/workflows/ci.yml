@@ -85,8 +85,10 @@ jobs:
                 -DASTRA_ENABLE_TESTS=ON -DASTRA_ENABLE_SANITIZERS=ON
       - name: Build
         run: cmake --build build-san -j"$(nproc)"
-      - name: Test
-        run: ctest --test-dir build-san --output-on-failure -E "Ebpf"
+      # Isolation tests are excluded here: ASan shadow memory does not
+      # survive unshare/pivot_root. They run un-sanitized in build-test.
+      - name: Test (eBPF + isolation excluded under ASan)
+        run: ctest --test-dir build-san --output-on-failure -E "Ebpf|Namespace|Mount|Seccomp"
 
   cbmc-proof:
     runs-on: ubuntu-24.04
