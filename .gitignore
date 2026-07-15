@@ -119,3 +119,28 @@ Thumbs.db
 *.tmp
 *.bak
 *.log
+
+# CTest scratch output at repo root (created by ctest runs)
+Testing/
+
+# Linux-container validation build dirs
+build-linux/
+build-linux-rel/
+
+# Paper 1 — generated artefacts (regenerate via run_paper1_sweep.sh + build.sh)
+artefact/
+papers/paper1/main.pdf
+papers/paper1/main.log
+papers/paper1/main.blg
+papers/paper1/*.aux
+papers/paper1/*.bbl
+papers/paper1/*.out
+papers/paper1/figures/*.pdf
+papers/paper1/figures/*.STUB
+papers/paper1/figures/*.aux
+papers/paper1/figures/*.log
+papers/paper1/submission/anonymous.tar.gz
+papers/paper1/submission/_stage/
+
+# Claude Code local state
+.claude/

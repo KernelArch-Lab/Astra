@@ -128,7 +128,8 @@ void runPayload(std::size_t payload, std::size_t iters, double tscPerNs)
             while (got < payload)
             {
                 int n = submitReadSync(echoRing, down[0],
-                                       buf.data() + got, payload - got);
+                                       buf.data() + got,
+                                       static_cast<unsigned>(payload - got));
                 if (n <= 0) return;
                 got += static_cast<std::size_t>(n);
             }
@@ -136,7 +137,8 @@ void runPayload(std::size_t payload, std::size_t iters, double tscPerNs)
             while (put < payload)
             {
                 int n = submitWriteSync(echoRing, up[1],
-                                        buf.data() + put, payload - put);
+                                        buf.data() + put,
+                                        static_cast<unsigned>(payload - put));
                 if (n <= 0) return;
                 put += static_cast<std::size_t>(n);
             }
@@ -150,7 +152,8 @@ void runPayload(std::size_t payload, std::size_t iters, double tscPerNs)
         while (put < payload)
         {
             int n = submitWriteSync(sendRing, down[1],
-                                    tx.data() + put, payload - put);
+                                    tx.data() + put,
+                                    static_cast<unsigned>(payload - put));
             if (n <= 0) std::exit(2);
             put += static_cast<std::size_t>(n);
         }
@@ -158,7 +161,8 @@ void runPayload(std::size_t payload, std::size_t iters, double tscPerNs)
         while (got < payload)
         {
             int n = submitReadSync(sendRing, up[0],
-                                   rx.data() + got, payload - got);
+                                   rx.data() + got,
+                                   static_cast<unsigned>(payload - got));
             if (n <= 0) std::exit(2);
             got += static_cast<std::size_t>(n);
         }

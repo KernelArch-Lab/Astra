@@ -17,8 +17,9 @@ IPC fastpath on stock Linux, without kernel modification, special
 hardware (CHERI/Morello), or hypervisor support. Our headline
 contribution is a *slot-indexed validate path* that costs
 \todoNum{X}\,ns at p99 per message while preserving 2^96-bit forgery
-resistance and supporting Cornucopia\,Reloaded-class O(1) cascading
-revocation in software.
+resistance and supporting Cornucopia\,Reloaded-class cascading
+revocation in software, with O(1) time-to-effect independent of pool
+occupancy.
 
 We position the work in the empty cell of (Linux-compatible) ∩ (no
 CHERI) ∩ (capability-mediated IPC) ∩ (measured against Aeron-class

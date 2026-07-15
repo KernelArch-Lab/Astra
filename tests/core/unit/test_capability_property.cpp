@@ -146,8 +146,10 @@ int runSeed(uint64_t seed, int ops)
         }
         else if (op < 45 && !live.empty())
         {
-            // derive
-            auto& parent = live[
+            // derive — copy the parent by value: the push_back below can
+            // reallocate `live`, and a reference taken here would dangle
+            // (heap-use-after-free caught by the ASan CI job, 2026-07-15).
+            const CapabilityToken parent = live[
                 std::uniform_int_distribution<size_t>(0, live.size()-1)(rng)];
             Permission childPerms = pickPerm();
             // Force subset for realism by ANDing with parent

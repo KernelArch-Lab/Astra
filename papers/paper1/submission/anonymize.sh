@@ -25,27 +25,40 @@ mkdir -p "$STAGE"
 
 echo "==> Staging anonymous tarball into $STAGE"
 
-# Copy LaTeX inputs
-cp "$PAPER_DIR/main.tex"          "$STAGE/"
-cp "$PAPER_DIR/macros.tex"        "$STAGE/"
-cp "$PAPER_DIR/bibliography.bib"  "$STAGE/"
-cp -r "$PAPER_DIR/sections"       "$STAGE/"
+# Copy LaTeX inputs — the tarball must be self-contained, so the vendored
+# USENIX style file ships too.
+cp "$PAPER_DIR/main.tex"             "$STAGE/"
+cp "$PAPER_DIR/macros.tex"           "$STAGE/"
+cp "$PAPER_DIR/bibliography.bib"     "$STAGE/"
+cp "$PAPER_DIR/usenix-2020-09.sty"   "$STAGE/"
+cp -r "$PAPER_DIR/sections"          "$STAGE/"
 [ -d "$PAPER_DIR/figures" ]  && cp -r "$PAPER_DIR/figures" "$STAGE/"
 [ -d "$PAPER_DIR/numbers" ]  && cp -r "$PAPER_DIR/numbers" "$STAGE/"
+rm -f "$STAGE"/figures/*.STUB
 
 # Force \anontrue
 sed -i.bak 's/\\anonfalse/\\anontrue/' "$STAGE/main.tex"
 rm -f "$STAGE/main.tex.bak"
 
-# Strip KernelArch-specific URLs from sources
-find "$STAGE" -name '*.tex' -print0 | while IFS= read -r -d '' f; do
+# Strip identifying strings from ALL sources, including the bibliography —
+# the astra-confcompute tech-report entry names the lab as author.
+find "$STAGE" \( -name '*.tex' -o -name '*.bib' \) -print0 | while IFS= read -r -d '' f; do
     sed -i.bak \
         -e 's|github.com/KernelArch-Lab/Astra|REDACTED-FOR-REVIEW|g' \
         -e 's|kernelarch.com|REDACTED-FOR-REVIEW.example|g' \
         -e 's|paper1-artefact@kernelarch.com|paper1-artefact@REDACTED|g' \
+        -e 's|KernelArch Labs|Anonymous|g' \
+        -e 's|KernelArch|Anonymous|g' \
         "$f"
     rm -f "${f}.bak"
 done
+
+# Belt-and-braces: fail loudly if an identifying string survived.
+if grep -ri "kernelarch" "$STAGE" >/dev/null 2>&1; then
+    echo "ERROR: identifying string 'KernelArch' survived anonymization:" >&2
+    grep -ri "kernelarch" "$STAGE" >&2
+    exit 1
+fi
 
 cd "$SUBMIT_DIR"
 tar -czf anonymous.tar.gz -C _stage .
@@ -56,3 +69,4 @@ echo "    Verify: tar -tzf $SUBMIT_DIR/anonymous.tar.gz"
 echo "    Re-build inside the tarball:"
 echo "        mkdir _check && tar -xzf $SUBMIT_DIR/anonymous.tar.gz -C _check && \\"
 echo "        cd _check && pdflatex main && bibtex main && pdflatex main && pdflatex main"
+echo "    (or: cd _check && tectonic main.tex)"

@@ -21,14 +21,14 @@ def main() -> int:
     args = ap.parse_args()
 
     if not args.csv.exists():
-        print(r"\textit{paper1\_perfcounters.csv missing — run sweep.}",
+        print(r"\textit{paper1\_perfcounters.csv missing --- run sweep.}",
               file=sys.stderr)
         # Still emit a placeholder so LaTeX doesn't error.
         print(r"\begin{tabular}{lrrrr}")
         print(r"\toprule")
         print(r"Pool & cycles & L1d-miss & LLC-miss & branch-miss \\")
         print(r"\midrule")
-        print(r"\multicolumn{5}{c}{\textit{(no data — run sweep)}} \\")
+        print(r"\multicolumn{5}{c}{\textit{(no data --- run sweep)}} \\")
         print(r"\bottomrule")
         print(r"\end{tabular}")
         return 0
@@ -67,7 +67,7 @@ def main() -> int:
         cells = []
         for p in pools:
             v = table[metric].get(p)
-            cells.append(f"{v:.2f}" if v is not None else "—")
+            cells.append(f"{v:.2f}" if v is not None else "---")
         print(f"{nice} & " + " & ".join(cells) + r" \\")
     print(r"\bottomrule")
     print(r"\end{tabular}")

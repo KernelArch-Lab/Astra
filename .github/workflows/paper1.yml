@@ -1,0 +1,54 @@
+# =============================================================================
+# Paper 1 — LaTeX build gate
+#
+# Builds papers/paper1/main.pdf with tectonic on every change under
+# papers/ and runs the internal review checklist (build.sh --check).
+# Also produces the anonymized double-blind tarball, verifies it
+# rebuilds standalone, and uploads both as workflow artifacts.
+# =============================================================================
+name: paper1
+
+on:
+  push:
+    branches: [main]
+    paths: ['papers/**', 'scripts/gen_numbers_tex.py', 'scripts/plot_paper1_*.py']
+  pull_request:
+    paths: ['papers/**', 'scripts/gen_numbers_tex.py', 'scripts/plot_paper1_*.py']
+
+jobs:
+  build-paper:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tectonic
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://drop-sh.fullyjustified.net | sh
+          sudo mv tectonic /usr/local/bin/
+          tectonic --version
+
+      - name: Build PDF + internal review checklist
+        run: ./papers/paper1/build.sh --check
+
+      - name: Anonymized tarball builds standalone
+        run: |
+          ./papers/paper1/submission/anonymize.sh
+          mkdir -p /tmp/anon_check
+          tar -xzf papers/paper1/submission/anonymous.tar.gz -C /tmp/anon_check
+          cd /tmp/anon_check
+          if grep -ri kernelarch .; then
+            echo "identifying string survived anonymization" >&2; exit 1
+          fi
+          tectonic main.tex
+
+      - name: Upload paper PDF
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper1-main-pdf
+          path: papers/paper1/main.pdf
+
+      - name: Upload anonymous tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper1-anonymous-tarball
+          path: papers/paper1/submission/anonymous.tar.gz

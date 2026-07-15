@@ -771,7 +771,7 @@ All ten sprints landed in main between commits `635b86d` (Sprint 4) and
 ```
 papers/paper1/
 ├── main.tex                 # USENIX two-column root
-├── macros.tex               # \sysname, \validateP99 etc. — placeholders
+├── macros.tex               # \sysname, \validateTail etc. — placeholders
 │                            # filled by gen_numbers_tex.py
 ├── bibliography.bib         # 36 entries
 ├── build.sh                 # pdflatex×2 + bibtex driver
@@ -1023,7 +1023,7 @@ interpret `-fstack-protector-strong` as an output format directive.
 │   ├── run_paper1_sweep.sh       # bench sweep → artefact/*.csv
 │   ├── check_paper1_env.sh       # pre-flight for paper build
 │   ├── plot_paper1_figure*.py    # 4 figure plotters
-│   ├── gen_numbers_tex.py        # CSV → \def\validateP99{...}
+│   ├── gen_numbers_tex.py        # CSV → \def\validateTail{...}
 │   └── gen_table_perf.py         # perf-counter CSV → tabular
 │
 ├── papers/paper1/                # Paper 1 LaTeX + outline + submission templates
@@ -1235,7 +1235,7 @@ contributors and to reviewers.
    process) needs a STANDARD profile with a wider list. The
    `ProfileEngine` reserves the slot but the allowlist isn't built.
 
-7. **Paper 1 still has placeholders.** `\validateP99`, `\revokeP99`
+7. **Paper 1 still has placeholders.** `\validateTail`, `\revokeTail`
    etc. in `papers/paper1/macros.tex` render as red `[todoNum]`
    markers until `./scripts/compile-astra.sh sweep` runs on a tuned
    Linux box. Same for the 4 figures.
@@ -1333,7 +1333,7 @@ PR title format: `<type>(<module>): <one-line summary>`
 Examples:
 - `feat(M-03): IPC Sprint 4 — IpcService auto-channel creation`
 - `fix(M-01): cascade revoke can miss generation-3 grandchildren under contention`
-- `docs(paper1): fill validateP99 + aeronGapPercent from artefact/figure_1.csv`
+- `docs(paper1): fill validateTail + aeronGapPercent from artefact/figure_1.csv`
 
 ---
 

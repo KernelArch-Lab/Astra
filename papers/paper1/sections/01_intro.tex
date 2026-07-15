@@ -42,7 +42,7 @@ the IPC fastpath without losing the latency floor that motivates
 zero-copy IPC in the first place?"
 
 We answer this with a head-to-head measurement against five reference
-transports---pipe(2), socketpair, io_uring, Aeron, eRPC---in the same
+transports---pipe(2), socketpair, io\_uring, Aeron, eRPC---in the same
 TSC domain on the same machine.
 
 \para{Why this is non-obvious}
@@ -74,7 +74,7 @@ wait-free MPSC IPC fastpath in shared mmap memory
 on the IPC fastpath without losing the $2^{96}$ forgery space
 (\Cref{sec:design:fastpath}).
 \item A reproducible, same-TSC-domain head-to-head against pipe(2),
-socketpair, io_uring, Aeron, and eRPC, with throughput, MPSC scaling,
+socketpair, io\_uring, Aeron, and eRPC, with throughput, MPSC scaling,
 revocation-latency, and microarchitectural perf-counter measurements,
 all driven by a single shell command (\Cref{sec:eval}).
 \item A property-based oracle test, a CBMC bounded-model proof of
@@ -83,10 +83,10 @@ together back every numerical claim in the paper
 (\Cref{sec:eval:correctness}).
 \end{enumerate}
 
-\Cref{sec:eval} reports per-message gate cost of \gateOverheadP99 ns at
+\Cref{sec:eval} reports per-message gate cost of \gateOverheadTail ns at
 p99 across payload sizes 64 B--16 KiB, keeping the gated path within
 \aeronGapPercent\% of Aeron's RTT floor. The slot-indexed validate
-itself runs in \validateP99 ns at p99 \textit{regardless of pool
+itself runs in \validateTail ns at p99 \textit{regardless of pool
 occupancy} (\Cref{fig:figure-2}), confirming the $O(1)$ claim.
 
 \para{What we explicitly do not claim}
@@ -95,7 +95,7 @@ and EROS~\cite{shapiro1999eros} established the pattern, and
 Cornucopia\,Reloaded~\cite{cornucopia-reloaded} is a recent peer.
 Our contribution is the \textit{first software-only realisation on
 stock Linux}, with measured numbers under contention. memfd zero-copy
-IPC is similarly not novel as a substrate---Aeron and io_uring share
+IPC is similarly not novel as a substrate---Aeron and io\_uring share
 the design template; we reuse it and gate it.
 
 \para{Roadmap}

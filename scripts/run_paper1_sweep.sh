@@ -3,14 +3,22 @@
 # Astra Runtime - Paper 1 (USENIX ATC 2027) reproducible benchmark sweep
 # scripts/run_paper1_sweep.sh
 #
-# Track B Sprint 7. Runs every baseline harness in the same TSC domain,
-# same warm-up policy, same payload sweep, and concatenates the CSV
-# rows into a single figure_1.csv that scripts/plot_paper1_figure.py
-# turns into the headline figure.
+# Track B Sprint 7 (+ AE hardening). Runs every baseline harness in the
+# same TSC domain, same warm-up policy, same payload sweep. Each benchmark
+# is executed REPS times end-to-end (fresh process per run, paper
+# methodology: five repetitions, median-of-runs reported, >5% CoV
+# flagged); scripts/paper1_merge_reps.py folds the repetitions into the
+# canonical CSVs the plotters read and writes a CoV stability report.
+#
+# The host environment (kernel, governor, isolation, SMT, compiler,
+# commit) is captured next to the CSVs — numbers without provenance are
+# not paper numbers.
 #
 # Usage
 # -----
-#   ./scripts/run_paper1_sweep.sh                       # default
+#   ./scripts/run_paper1_sweep.sh                       # 5 repetitions
+#   ./scripts/run_paper1_sweep.sh --reps 3              # custom
+#   ./scripts/run_paper1_sweep.sh --quick               # 1 rep (smoke test)
 #   ./scripts/run_paper1_sweep.sh --build-dir build-r   # custom build dir
 #   ./scripts/run_paper1_sweep.sh --out artefact/p1.csv # custom output
 #
@@ -31,14 +39,17 @@ set -euo pipefail
 BUILD_DIR="build"
 OUT_FILE="artefact/paper1_figure_1.csv"
 PERF=""
+REPS=5
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --build-dir) BUILD_DIR="$2"; shift 2;;
         --out)       OUT_FILE="$2"; shift 2;;
+        --reps)      REPS="$2"; shift 2;;
+        --quick)     REPS=1; shift;;
         --perf)      PERF="perf stat -e cache-misses,context-switches"; shift;;
         -h|--help)
-            sed -n '2,28p' "$0"
+            sed -n '2,33p' "$0"
             exit 0;;
         *) echo "unknown arg: $1" >&2; exit 1;;
     esac
@@ -47,7 +58,42 @@ done
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-mkdir -p "$(dirname "$OUT_FILE")"
+ART_DIR="$(dirname "$OUT_FILE")"
+mkdir -p "$ART_DIR"
+MERGE="python3 scripts/paper1_merge_reps.py"
+COV_REPORT="$ART_DIR/paper1_cov_report.txt"
+: > "$COV_REPORT"
+
+# --- 0. Environment capture + tuning warnings --------------------------------
+ENV_FILE="$ART_DIR/environment.txt"
+{
+    echo "# Captured by run_paper1_sweep.sh on $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "git_commit:   $(git rev-parse HEAD 2>/dev/null || echo unknown)"
+    echo "git_dirty:    $(git status --porcelain 2>/dev/null | wc -l | tr -d ' ') modified files"
+    echo "kernel:       $(uname -sr)"
+    echo "cmdline:      $(cat /proc/cmdline 2>/dev/null || echo n/a)"
+    echo "cpu_model:    $(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- || echo n/a)"
+    echo "governor:     $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo n/a)"
+    echo "smt:          $(cat /sys/devices/system/cpu/smt/control 2>/dev/null || echo n/a)"
+    echo "isolcpus:     $(grep -o 'isolcpus=[^ ]*' /proc/cmdline 2>/dev/null || echo none)"
+    echo "compiler:     $(c++ --version 2>/dev/null | head -1 || echo n/a)"
+    echo "cmake:        $(cmake --version 2>/dev/null | head -1 || echo n/a)"
+    echo "reps:         $REPS"
+} > "$ENV_FILE"
+echo "==> Environment captured to $ENV_FILE"
+
+GOV="$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo unknown)"
+if [[ "$GOV" != "performance" ]]; then
+    echo "WARNING: cpufreq governor is '$GOV', not 'performance'." >&2
+    echo "         sudo cpupower frequency-set -g performance" >&2
+fi
+SMT="$(cat /sys/devices/system/cpu/smt/control 2>/dev/null || echo unknown)"
+if [[ "$SMT" == "on" ]]; then
+    echo "WARNING: SMT is enabled — paper numbers are taken with SMT off." >&2
+fi
+if ! grep -q isolcpus /proc/cmdline 2>/dev/null; then
+    echo "WARNING: no isolcpus= on the kernel cmdline — expect noisier tails." >&2
+fi
 
 # --- 1. Build all baselines -------------------------------------------------
 echo "==> Building paper1_baselines target in $BUILD_DIR"
@@ -57,66 +103,84 @@ if [[ ! -d "$BUILD_DIR" ]]; then
 fi
 cmake --build "$BUILD_DIR" --target paper1_baselines -j
 
-# --- 2. Run the required baselines ------------------------------------------
-echo "==> Running baselines into $OUT_FILE"
-echo "transport,payload_bytes,iters,p50_ns,p99_ns,p9999_ns,max_ns,mean_ns" > "$OUT_FILE"
-
-run_one () {
+# --- 2. Repetition runner ----------------------------------------------------
+# run_reps <binary> <out-base>: runs REPS times into <out-base>.repK.csv.
+# Returns 1 if any required rep fails.
+run_reps () {
     local name="$1"
+    local outBase="$2"
     local bin="$BUILD_DIR/tests/bench/$name"
     if [[ ! -x "$bin" ]]; then
         echo "  SKIP $name (binary missing)"
-        return
+        return 2
     fi
-    echo "  RUN $name"
-    # Discard the per-binary header line; keep only data rows.
-    $PERF "$bin" 2>/dev/null | grep -v '^transport,' >> "$OUT_FILE" || {
-        echo "  FAIL $name" >&2
-        return 1
-    }
+    local k
+    for k in $(seq 1 "$REPS"); do
+        echo "  RUN  $name (rep $k/$REPS)"
+        $PERF "$bin" > "${outBase}.rep${k}.csv" 2>/dev/null || {
+            echo "  FAIL $name rep $k" >&2
+            return 1
+        }
+    done
+    return 0
 }
 
-# Required for the figure
+# --- 3. Required baselines (RTT figure) --------------------------------------
+echo "==> Running required baselines ($REPS reps each)"
 REQ=(bench_baseline_pipe
      bench_baseline_socketpair
      bench_baseline_io_uring
      bench_baseline_astra
      bench_baseline_astra_gated)
 
-for b in "${REQ[@]}"; do run_one "$b"; done
+REQ_CSVS=()
+for b in "${REQ[@]}"; do
+    run_reps "$b" "$ART_DIR/_${b}"
+    for k in $(seq 1 "$REPS"); do REQ_CSVS+=("$ART_DIR/_${b}.rep${k}.csv"); done
+done
 
-# Optional — present if dep installed; otherwise emits a SKIPPED row.
+# Optional — present if dep installed; otherwise skipped.
 OPT=(bench_baseline_aeron
      bench_baseline_erpc)
-
-for b in "${OPT[@]}"; do run_one "$b" || true; done
-
-# --- 3. Sprint 8 extended metrics (separate CSVs, distinct schemas) ---------
-ART_DIR="$(dirname "$OUT_FILE")"
-
-run_to_file () {
-    local name="$1"
-    local out="$2"
-    local bin="$BUILD_DIR/tests/bench/$name"
-    if [[ ! -x "$bin" ]]; then
-        echo "  SKIP $name (binary missing)"; return
+for b in "${OPT[@]}"; do
+    if run_reps "$b" "$ART_DIR/_${b}"; then
+        for k in $(seq 1 "$REPS"); do REQ_CSVS+=("$ART_DIR/_${b}.rep${k}.csv"); done
     fi
-    echo "  RUN  $name → $out"
-    $PERF "$bin" > "$out" 2>/dev/null || {
-        echo "  FAIL $name" >&2; return 1
-    }
+done
+
+# Median-merge every transport's reps into the canonical figure-1 CSV.
+$MERGE --mode median --key transport,payload_bytes \
+       --out "$OUT_FILE" --cov-report "$COV_REPORT" "${REQ_CSVS[@]}"
+
+# --- 4. Sprint 8 extended metrics --------------------------------------------
+echo "==> Running Sprint 8 metrics ($REPS reps each)"
+
+merge_metric () {
+    local name="$1" out="$2" mode="$3" key="$4"
+    local reps=() k
+    if ! run_reps "$name" "$ART_DIR/_${name}"; then
+        return 0    # optional path: binary missing or failed — plotters self-skip
+    fi
+    for k in $(seq 1 "$REPS"); do reps+=("$ART_DIR/_${name}.rep${k}.csv"); done
+    if [[ "$mode" == "median" ]]; then
+        $MERGE --mode median --key "$key" \
+               --out "$out" --cov-report "$COV_REPORT" "${reps[@]}"
+    else
+        $MERGE --mode concat --out "$out" "${reps[@]}"
+    fi
 }
 
-echo "==> Running Sprint 8 metrics"
-run_to_file bench_throughput         "$ART_DIR/paper1_throughput.csv"        || true
-run_to_file bench_throughput_mpsc    "$ART_DIR/paper1_throughput_mpsc.csv"   || true
-run_to_file bench_revocation_latency "$ART_DIR/paper1_revocation.csv"        || true
-run_to_file bench_perfcounters       "$ART_DIR/paper1_perfcounters.csv"      || true
-run_to_file bench_pool_scaling       "$ART_DIR/paper1_pool_scaling.csv"      || true
+merge_metric bench_throughput         "$ART_DIR/paper1_throughput.csv"      median transport,payload_bytes
+merge_metric bench_throughput_mpsc    "$ART_DIR/paper1_throughput_mpsc.csv" median transport,payload_bytes,producers,gate_state
+merge_metric bench_revocation_latency "$ART_DIR/paper1_revocation.csv"      concat -
+merge_metric bench_perfcounters       "$ART_DIR/paper1_perfcounters.csv"    median metric,pool_active
+merge_metric bench_pool_scaling       "$ART_DIR/paper1_pool_scaling.csv"    median metric,pool_active
 
-# --- 4. Summary -------------------------------------------------------------
+# --- 5. Summary -------------------------------------------------------------
 echo
-echo "==> Sweep complete"
+echo "==> Sweep complete ($REPS repetitions, median-merged)"
+echo "    Environment:           $ENV_FILE"
+echo "    CoV stability report:  $COV_REPORT"
 echo "    Figure 1 (latency):    $OUT_FILE  ($(wc -l < "$OUT_FILE") rows)"
 echo "    Throughput:            $ART_DIR/paper1_throughput.csv"
 echo "    MPSC scaling:          $ART_DIR/paper1_throughput_mpsc.csv"
@@ -124,6 +188,7 @@ echo "    Revocation latency:    $ART_DIR/paper1_revocation.csv"
 echo "    Perf counters:         $ART_DIR/paper1_perfcounters.csv"
 echo "    Pool-size scaling:     $ART_DIR/paper1_pool_scaling.csv"
 echo
+echo "    Per-repetition raw CSVs kept as $ART_DIR/_<bench>.repK.csv"
 echo "    Figure 1 plot:    python3 scripts/plot_paper1_figure.py $OUT_FILE"
 echo "    Figure 2 plot:    python3 scripts/plot_paper1_figure_2.py $ART_DIR/paper1_pool_scaling.csv"
 echo "    Quick read:       column -t -s, $OUT_FILE | sort -k1,1 -k2,2n"

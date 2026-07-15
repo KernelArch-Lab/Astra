@@ -38,7 +38,7 @@ attack (up). The gap decomposes as follows:
 
 \begin{itemize}
 \itemsep0pt
-\item Two \texttt{validate()} calls per round trip ($\sim$\gateOverheadP99\,ns
+\item Two \texttt{validate()} calls per round trip ($\sim$\gateOverheadTail\,ns
 total at p99). This is irreducible without either dropping security
 or moving to a less constant-time comparator.
 \item C++23 range-checked vector and \texttt{Result<T>} unwrap on the

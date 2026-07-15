@@ -80,7 +80,10 @@ def main() -> int:
     iour  = pickP99(f1, "io_uring",    256)
     pip   = pickP99(f1, "pipe",        256)
 
-    delta_p99 = max(0.0, gatA - rawA)
+    # Per-message gate cost is HALF the gated-raw RTT delta: each round
+    # trip validates twice (IPC_SEND at the producer, IPC_RECV at the
+    # consumer). Keep in sync with the equation in sections/06_evaluation.
+    delta_p99 = max(0.0, (gatA - rawA) / 2.0)
     aeron_gap = (gatA - aer) / aer * 100 if aer > 0 else 0
 
     pool_at_full = pickPool(pool, 4090)
@@ -96,17 +99,17 @@ def main() -> int:
     print(r"% Re-run build.sh --refresh after a sweep run.")
     def emit(name: str, val: str) -> None:
         print(rf"\renewcommand{{\{name}}}{{{val}}}")
-    emit("validateP50",   f"{val_p50:.0f}")
-    emit("validateP99",   f"{val_p99:.0f}")
-    emit("validateP9999", f"{val_p9999:.0f}")
+    emit("validateMedian",   f"{val_p50:.0f}")
+    emit("validateTail",   f"{val_p99:.0f}")
+    emit("validateFourNines", f"{val_p9999:.0f}")
     emit("rawAstraRTT",   f"{rawA:.0f}")
     emit("gatedAstraRTT", f"{gatA:.0f}")
     emit("aeronRTT",      f"{aer:.0f}")
     emit("iouringRTT",    f"{iour:.0f}")
     emit("pipeRTT",       f"{pip:.0f}")
-    emit("gateOverheadP99", f"{delta_p99:.0f}")
+    emit("gateOverheadTail", f"{delta_p99:.0f}")
     emit("aeronGapPercent", f"{aeron_gap:.1f}")
-    emit("revokeP99",       f"{rev_p99_us:.1f}")
+    emit("revokeTail",       f"{rev_p99_us:.1f}")
     return 0
 
 

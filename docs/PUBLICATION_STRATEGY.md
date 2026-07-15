@@ -310,8 +310,13 @@ prepared during the same year-1 window.
 By end of month 12 (April 2027):
 
 - Paper 1 submitted to USENIX ATC 2027 with reproducible benchmark
-  artifact runnable via `./scripts/compile-astra.sh -R Bench`.
+  artifact runnable via `./scripts/run_paper1_sweep.sh` (5-repetition,
+  CoV-gated, environment-capturing — see
+  [PAPER1_REPRODUCIBILITY.md](PAPER1_REPRODUCIBILITY.md)).
 - The CBMC monotonicity proof is in CI; no PR can break it.
+  *(Wired 2026-07-15: `.github/workflows/ci.yml` `cbmc-proof` job,
+  alongside build+ctest, sanitizer, bench-build, and paper-build
+  gates. Activates on the next push to GitHub.)*
 - M-22 AgentGuard has a working ToolBroker prototype demoable to
   external partners (Anthropic, OpenAI, Microsoft).
 - Two of {Paper 2, Paper 4, Paper 5} have running prototypes on `main`.
