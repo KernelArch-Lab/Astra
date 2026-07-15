@@ -111,7 +111,12 @@ static bool testAllowedSyscall()
         // write() is on the allowlist. If seccomp incorrectly blocked it,
         // the child would be killed by SIGSYS before exit(SUCCESS).
         const char lSzMsg[] = "  [seccomp] write() allowed\n";
-        ::write(STDOUT_FILENO, lSzMsg, sizeof(lSzMsg) - 1);
+        // Return value deliberately unused — reaching the next line at all
+        // proves seccomp allowed the syscall (glibc marks write() with
+        // warn_unused_result under _FORTIFY_SOURCE, fatal with -Werror).
+        const ssize_t lIWritten =
+            ::write(STDOUT_FILENO, lSzMsg, sizeof(lSzMsg) - 1);
+        (void)lIWritten;
 
         // If we reach here, write() was allowed. Exit cleanly.
         std::exit(EXIT_SUCCESS);

@@ -120,6 +120,7 @@ cmd_deps() {
         perf cbmc \
         gdb strace \
         kernel-tools \
+        libuuid-devel \
         python3-matplotlib python3-pandas python3-numpy \
         texlive-scheme-medium texlive-collection-latexrecommended \
         git
@@ -424,10 +425,24 @@ cmd_paper1() {
     info "Paper-1 pipeline: check → sysctl → tune → aeron → build(Release) → ctest → cbmc → sweep → paper → anonymize"
 
     # -- 1. Pre-flight; self-heal with dnf once if it fails ------------------
-    if ! cmd_check; then
-        warn "Pre-flight failed — attempting '$0 deps' once"
+    # Tools that cmd_check treats as optional are REQUIRED for the paper
+    # pipeline: cbmc (proof gate), pdflatex (PDF), matplotlib/pandas/numpy
+    # (plotters + rep merger), liburing (io_uring is a PRIMARY baseline —
+    # without the header it silently self-skips and Figure 1 loses a line).
+    _paper1_tools_ok() {
+        have cbmc && have pdflatex \
+            && python3 -c "import matplotlib, pandas, numpy" 2>/dev/null \
+            && [[ -f /usr/include/liburing.h ]]
+    }
+    if ! cmd_check || ! _paper1_tools_ok; then
+        warn "Pre-flight incomplete for paper1 — running '$0 deps' once"
         cmd_deps
         cmd_check || { err "Pre-flight still failing after deps."; return 2; }
+        _paper1_tools_ok || {
+            err "Paper-critical tools still missing after deps"
+            err "(need: cbmc, pdflatex, python3 matplotlib+pandas+numpy, liburing-devel)."
+            return 2
+        }
     fi
     cmd_sysctl || warn "sysctl step failed — perfcounter bench may self-skip"
 
@@ -443,21 +458,38 @@ cmd_paper1() {
     fi
 
     # -- 3. Aeron: the primary baseline. Auto-provision unless told not to --
+    # We configure Aeron ourselves with a minimal C++-client-only profile
+    # instead of cppbuild/cppbuild: the full build drags in a JDK (system
+    # tests) and archive tooling that the bench does not need. The bench
+    # links ${AERON_DIR}/lib/libaeron_client.so and includes the client
+    # sources, so a lib symlink to the cmake output dir completes the
+    # expected layout. Guard on the LIB, not the headers — a clone whose
+    # build failed must retry the build, not skip it.
     local aeronFlag=()
     if (( useAeron )); then
         local aeronDir="${AERON_DIR:-$REPO_ROOT/third_party/aeron}"
-        if [[ ! -f "$aeronDir/aeron-client/src/main/cpp/Aeron.h" ]]; then
-            info "Aeron not found at $aeronDir — cloning + building (one-time, ~10 min)"
-            if git clone --depth 1 https://github.com/real-logic/aeron.git "$aeronDir" 2>/dev/null \
-               && ( cd "$aeronDir" && ./cppbuild/cppbuild ); then
-                ok "Aeron built."
+        if [[ ! -d "$aeronDir" ]]; then
+            info "Cloning Aeron into $aeronDir"
+            git clone --depth 1 https://github.com/real-logic/aeron.git "$aeronDir" \
+                || { warn "Aeron clone failed"; aeronDir=""; }
+        fi
+        if [[ -n "$aeronDir" && ! -e "$aeronDir/lib/libaeron_client.so" ]]; then
+            info "Building Aeron C++ client (minimal profile, one-time, ~5 min)"
+            if cmake -S "$aeronDir" -B "$aeronDir/cppbuild/Release" \
+                     -DCMAKE_BUILD_TYPE=Release \
+                     -DAERON_TESTS=OFF -DAERON_SYSTEM_TESTS=OFF \
+                     -DAERON_UNIT_TESTS=OFF -DAERON_BUILD_SAMPLES=OFF \
+                     -DBUILD_AERON_ARCHIVE_API=OFF -DAERON_BUILD_DOCUMENTATION=OFF \
+               && cmake --build "$aeronDir/cppbuild/Release" \
+                        --target aeron_client aeronmd -j"$JOBS"; then
+                ln -sfn "cppbuild/Release/lib" "$aeronDir/lib"
+                ok "Aeron client built."
             else
-                warn "Aeron clone/build FAILED — bench_baseline_aeron will emit SKIPPED"
+                warn "Aeron build FAILED — bench_baseline_aeron will emit SKIPPED"
                 warn "and \\aeronGapPercent (the headline number) will stay a red placeholder."
-                aeronDir=""
             fi
         fi
-        [[ -n "$aeronDir" && -f "$aeronDir/aeron-client/src/main/cpp/Aeron.h" ]] \
+        [[ -n "$aeronDir" && -e "$aeronDir/lib/libaeron_client.so" ]] \
             && aeronFlag=( "-DAERON_DIR=$aeronDir" )
     else
         warn "--skip-aeron: \\aeronGapPercent will stay a red placeholder."
