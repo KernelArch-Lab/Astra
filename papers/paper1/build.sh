@@ -9,6 +9,8 @@
 # Usage:
 #   ./build.sh              # build PDF only (assumes figures/numbers.tex up to date)
 #   ./build.sh --refresh    # also re-run sweep + plotters first
+#   ./build.sh --plots      # re-run plotters/generators from EXISTING artefact
+#                           # CSVs (no sweep) — for when the sweep already ran
 #   ./build.sh --anon       # produce anonymous-version PDF (default if \anontrue)
 #   ./build.sh --camera     # produce camera-ready PDF (overrides \anontrue)
 #   ./build.sh --check      # after building, run the internal review checklist
@@ -16,15 +18,17 @@
 set -euo pipefail
 
 REFRESH=0
+PLOTS=0
 CHECK=0
 MODE=""
 for arg in "$@"; do
     case "$arg" in
-        --refresh) REFRESH=1 ;;
+        --refresh) REFRESH=1; PLOTS=1 ;;
+        --plots)   PLOTS=1 ;;
         --check)   CHECK=1 ;;
         --anon)    MODE="anon" ;;
         --camera)  MODE="camera" ;;
-        -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
     esac
 done
 
@@ -57,9 +61,12 @@ compile_standalone () {
 }
 
 if [[ $REFRESH -eq 1 ]]; then
-    echo "==> Refreshing figures + numbers.tex"
+    echo "==> Running the benchmark sweep"
     (cd ../.. && ./scripts/run_paper1_sweep.sh)
+fi
 
+if [[ $PLOTS -eq 1 ]]; then
+    echo "==> Refreshing figures + numbers.tex from artefact CSVs"
     mkdir -p figures numbers
 
     python3 ../../scripts/plot_paper1_figure.py   ../../artefact/paper1_figure_1.csv \

@@ -23,6 +23,16 @@
 #   ./scripts/compile-astra.sh all             # deps + check + sysctl + build
 #                                              #   + cbmc + sweep + paper
 #
+#   ./scripts/compile-astra.sh paper1          # THE one-command Paper-1 run for
+#                                              # the lab box: check(+deps if
+#                                              # missing) + sysctl + governor +
+#                                              # Aeron autobuild + Release build
+#                                              # + full ctest + CBMC + 5-rep
+#                                              # sweep + PDF --check + anonymize
+#                                              # + headline-number summary.
+#                                              # Flags: --skip-aeron, --quick,
+#                                              #        --reps N
+#
 # Build-type / parallelism overrides (env vars):
 #   ASTRA_BUILD_TYPE=Release  ./scripts/compile-astra.sh
 #   ASTRA_BUILD_TYPE=Sanitize ./scripts/compile-astra.sh    # ASAN+UBSAN
@@ -109,7 +119,8 @@ cmd_deps() {
         liburing-devel \
         perf cbmc \
         gdb strace \
-        python3-matplotlib \
+        kernel-tools \
+        python3-matplotlib python3-pandas python3-numpy \
         texlive-scheme-medium texlive-collection-latexrecommended \
         git
     ok "Prerequisites installed."
@@ -389,6 +400,142 @@ cmd_clean() {
 }
 
 # ===========================================================================
+# Sub-command: paper1  (THE one-command Paper-1 pipeline for the lab box)
+#
+# Everything between `git pull` and a submission-ready PDF + anonymous
+# tarball, in dependency order, with the two traps engineered out:
+#   - numbers always come from a dedicated RELEASE build (build-paper1/),
+#     never from a stale Debug build/ (see commit 96e3dc2 post-mortem);
+#   - Aeron (the headline baseline) is auto-cloned + built unless
+#     --skip-aeron, so \aeronGapPercent cannot silently stay red.
+# ===========================================================================
+cmd_paper1() {
+    check_host
+    local p1Build="$REPO_ROOT/build-paper1"
+    local sweepArgs=() useAeron=1 a
+    for a in "$@"; do
+        [[ -z "$a" ]] && continue    # empty passthru from the dispatcher
+        case "$a" in
+            --skip-aeron) useAeron=0 ;;
+            *)            sweepArgs+=( "$a" ) ;;   # --quick / --reps N → sweep
+        esac
+    done
+
+    info "Paper-1 pipeline: check → sysctl → tune → aeron → build(Release) → ctest → cbmc → sweep → paper → anonymize"
+
+    # -- 1. Pre-flight; self-heal with dnf once if it fails ------------------
+    if ! cmd_check; then
+        warn "Pre-flight failed — attempting '$0 deps' once"
+        cmd_deps
+        cmd_check || { err "Pre-flight still failing after deps."; return 2; }
+    fi
+    cmd_sysctl || warn "sysctl step failed — perfcounter bench may self-skip"
+
+    # -- 2. Frequency governor (paper methodology requires 'performance') ----
+    if have cpupower; then
+        if sudo cpupower frequency-set -g performance >/dev/null 2>&1; then
+            ok "cpufreq governor: performance"
+        else
+            warn "Could not set governor — numbers will be noisier"
+        fi
+    else
+        warn "cpupower missing (sudo dnf install kernel-tools) — set the governor manually"
+    fi
+
+    # -- 3. Aeron: the primary baseline. Auto-provision unless told not to --
+    local aeronFlag=()
+    if (( useAeron )); then
+        local aeronDir="${AERON_DIR:-$REPO_ROOT/third_party/aeron}"
+        if [[ ! -f "$aeronDir/aeron-client/src/main/cpp/Aeron.h" ]]; then
+            info "Aeron not found at $aeronDir — cloning + building (one-time, ~10 min)"
+            if git clone --depth 1 https://github.com/real-logic/aeron.git "$aeronDir" 2>/dev/null \
+               && ( cd "$aeronDir" && ./cppbuild/cppbuild ); then
+                ok "Aeron built."
+            else
+                warn "Aeron clone/build FAILED — bench_baseline_aeron will emit SKIPPED"
+                warn "and \\aeronGapPercent (the headline number) will stay a red placeholder."
+                aeronDir=""
+            fi
+        fi
+        [[ -n "$aeronDir" && -f "$aeronDir/aeron-client/src/main/cpp/Aeron.h" ]] \
+            && aeronFlag=( "-DAERON_DIR=$aeronDir" )
+    else
+        warn "--skip-aeron: \\aeronGapPercent will stay a red placeholder."
+    fi
+
+    # -- 4. Dedicated Release build + full test suite ------------------------
+    info "Configuring RELEASE build in build-paper1/ (jobs: $JOBS)"
+    cmake -S "$REPO_ROOT" -B "$p1Build" \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DASTRA_ENABLE_TESTS=ON -DASTRA_ENABLE_BENCHMARKS=ON \
+          "${aeronFlag[@]}"
+    cmake --build "$p1Build" -j"$JOBS"
+
+    info "Running the full test suite (Release)"
+    local ctestArgs=( --test-dir "$p1Build" --output-on-failure )
+    if [[ $EUID -ne 0 ]] && ! ctest "${ctestArgs[@]}" -R "Ebpf" >/dev/null 2>&1; then
+        warn "eBPF tests need privileges not available — excluding them (CI covers them)"
+        ctestArgs+=( -E "Ebpf" )
+    fi
+    ctest "${ctestArgs[@]}" || { err "Tests failed — NOT proceeding to numbers."; return 1; }
+    ok "Test suite green."
+
+    # -- 5. Formal gate -------------------------------------------------------
+    cmd_cbmc || return 1
+
+    # -- 6. The measured sweep (5 reps default; --quick for smoke) -----------
+    info "Running Paper-1 sweep from the Release build"
+    "$REPO_ROOT/scripts/run_paper1_sweep.sh" --build-dir "$p1Build" "${sweepArgs[@]}" \
+        || { err "Sweep failed."; return 1; }
+
+    # -- 7. Paper: plots + numbers from the fresh CSVs, PDF, checklist -------
+    ( cd "$PAPER_DIR" && ./build.sh --plots --check ) \
+        || { err "Paper build / checklist failed."; return 1; }
+
+    # -- 8. Anonymous submission tarball --------------------------------------
+    ( cd "$PAPER_DIR" && ./submission/anonymize.sh ) \
+        || { err "Anonymization failed."; return 1; }
+
+    # -- 9. Summary: headline numbers + stability + thesis gates -------------
+    echo
+    ok "PAPER-1 PIPELINE COMPLETE"
+    echo
+    info "Headline numbers (papers/paper1/numbers/numbers.tex):"
+    grep renewcommand "$PAPER_DIR/numbers/numbers.tex" 2>/dev/null | sed 's/^/    /' || true
+    echo
+    local covWarn
+    covWarn="$(grep -c '^WARN' "$ARTEFACT_DIR/paper1_cov_report.txt" 2>/dev/null || echo 0)"
+    if [[ "$covWarn" -eq 0 ]]; then
+        ok "Cross-repetition stability: all headline cells under 5% CoV"
+    else
+        warn "$covWarn cell(s) exceed 5% CoV — inspect $ARTEFACT_DIR/paper1_cov_report.txt and re-run"
+    fi
+    # Thesis gates from papers/paper1/outline.md §1: X ≤ 50 ns, Y ≤ 30 %.
+    local gate gap
+    gate="$(sed -n 's/.*gateOverheadTail}{\([0-9.]*\)}.*/\1/p' "$PAPER_DIR/numbers/numbers.tex" 2>/dev/null || true)"
+    gap="$(sed -n  's/.*aeronGapPercent}{\([0-9.]*\)}.*/\1/p'  "$PAPER_DIR/numbers/numbers.tex" 2>/dev/null || true)"
+    if [[ -n "$gate" ]]; then
+        awk -v g="$gate" 'BEGIN{exit !(g<=50)}' \
+            && ok   "Thesis gate X: gate cost ${gate} ns ≤ 50 ns  — PASS" \
+            || warn "Thesis gate X: gate cost ${gate} ns > 50 ns — bring to the team before submitting"
+    fi
+    if [[ -n "$gap" ]]; then
+        awk -v y="$gap" 'BEGIN{exit !(y<=30)}' \
+            && ok   "Thesis gate Y: Aeron gap ${gap}% ≤ 30%  — PASS" \
+            || warn "Thesis gate Y: Aeron gap ${gap}% > 30% — bring to the team before submitting"
+    fi
+    echo
+    info "Outputs:"
+    echo "    $PAPER_DIR/main.pdf                          (the paper — check for red markers)"
+    echo "    $PAPER_DIR/submission/anonymous.tar.gz        (double-blind submission tarball)"
+    echo "    $ARTEFACT_DIR/environment.txt                 (host provenance)"
+    echo "    $ARTEFACT_DIR/paper1_cov_report.txt           (repetition stability)"
+    echo
+    info "Manual follow-ups: \\todoNum{N} in §6.3 (MPSC saturation, read off Figure 3),"
+    info "the O(n)-scan number in §6.2, and the §7 Discussion pass."
+}
+
+# ===========================================================================
 # Sub-command: all  (full pipeline)
 # ===========================================================================
 cmd_all() {
@@ -405,7 +552,7 @@ cmd_all() {
 # Argument parser
 # ===========================================================================
 usage() {
-    sed -n '2,43p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,53p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 # Flags first (must precede sub-command; sub-command swallows the rest)
@@ -419,7 +566,7 @@ while [[ $# -gt 0 ]]; do
         --skip-tests)  SKIP_TESTS=1; shift ;;
         --no-color)    COLOR=0; shift ;;
         -h|--help)     usage; exit 0 ;;
-        deps|check|sysctl|build|cbmc|sweep|paper|clean|all)
+        deps|check|sysctl|build|cbmc|sweep|paper|paper1|clean|all)
                        SUBCMD="$1"; shift; PASSTHRU=( "$@" ); break ;;
         -R|-E|-L|-j)   # ctest-style args — treat as default (build) passthru
                        PASSTHRU=( "$@" ); break ;;
@@ -442,6 +589,7 @@ case "$SUBCMD" in
     cbmc)    cmd_cbmc    "${PASSTHRU[@]:-}" ;;
     sweep)   cmd_sweep   "${PASSTHRU[@]:-}" ;;
     paper)   cmd_paper   "${PASSTHRU[@]:-}" ;;
+    paper1)  cmd_paper1  "${PASSTHRU[@]:-}" ;;
     clean)   cmd_clean   "${PASSTHRU[@]:-}" ;;
     all)     cmd_all     "${PASSTHRU[@]:-}" ;;
     *)       err "Unknown sub-command: $SUBCMD"; usage; exit 4 ;;

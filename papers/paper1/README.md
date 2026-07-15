@@ -16,9 +16,24 @@ Linux x86\_64 host with the prerequisites from
 `scripts/check_paper1_env.sh`:
 
 ```bash
+./scripts/compile-astra.sh paper1
+```
+
+That single command runs, in order: pre-flight (auto-installing dnf
+deps if missing), sysctls, cpufreq governor, Aeron auto-clone+build,
+a dedicated **Release** build (`build-paper1/`), the full ctest suite,
+the CBMC proof, the 5-repetition sweep, `build.sh --plots --check`,
+`anonymize.sh`, and prints the headline numbers with the thesis-gate
+verdicts (gate ≤ 50 ns, Aeron gap ≤ 30 %). Flags: `--quick` (1-rep
+smoke run), `--reps N`, `--skip-aeron`.
+
+The individual steps remain available for piecemeal runs:
+
+```bash
 ./scripts/check_paper1_env.sh              # verify pdflatex, matplotlib, etc.
 ./scripts/run_paper1_sweep.sh              # every benchmark × 5 reps → artefact/*.csv
-papers/paper1/build.sh --refresh --check   # figures + numbers + PDF + checklist
+papers/paper1/build.sh --refresh --check   # sweep + figures + numbers + PDF + checklist
+papers/paper1/build.sh --plots --check     # same but reuse existing artefact CSVs
 ```
 
 On a host without the benchmark prerequisites (e.g. macOS for

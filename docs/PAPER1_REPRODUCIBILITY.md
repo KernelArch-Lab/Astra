@@ -8,6 +8,16 @@
 
 ## TL;DR
 
+One command on a Fedora x86-64 host (auto-installs deps, tunes, builds
+Release, tests, proves, sweeps 5×, builds + checks the PDF, anonymizes,
+and prints the headline numbers against the thesis gates):
+
+```bash
+./scripts/compile-astra.sh paper1        # add --quick for a 1-rep smoke run
+```
+
+Or step by step:
+
 ```bash
 # 0. Verify host has every tool the paper needs:
 ./scripts/check_paper1_env.sh
