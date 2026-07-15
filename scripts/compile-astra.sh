@@ -467,10 +467,26 @@ cmd_paper1() {
     # build failed must retry the build, not skip it.
     local aeronFlag=()
     if (( useAeron )); then
+        # Pinned release: reproducible for AE, and 1.44.x is known to ship
+        # the in-tree C++ client with the `aeron_client` cmake target
+        # (master has drifted). Override with AERON_PIN=<tag> if needed.
+        local aeronPin="${AERON_PIN:-1.44.0}"
         local aeronDir="${AERON_DIR:-$REPO_ROOT/third_party/aeron}"
+
+        # A clone at the wrong ref with no built lib (e.g. a failed earlier
+        # attempt at master) is useless — replace it with the pinned tag.
+        if [[ -d "$aeronDir" && ! -e "$aeronDir/lib/libaeron_client.so" ]]; then
+            local aeronRef
+            aeronRef="$(git -C "$aeronDir" describe --tags --exact-match 2>/dev/null || echo none)"
+            if [[ "$aeronRef" != "$aeronPin" ]]; then
+                warn "Existing Aeron clone is at '$aeronRef' with no built lib — replacing with $aeronPin"
+                rm -rf "$aeronDir"
+            fi
+        fi
         if [[ ! -d "$aeronDir" ]]; then
-            info "Cloning Aeron into $aeronDir"
-            git clone --depth 1 https://github.com/real-logic/aeron.git "$aeronDir" \
+            info "Cloning Aeron $aeronPin into $aeronDir"
+            git clone --depth 1 --branch "$aeronPin" \
+                https://github.com/real-logic/aeron.git "$aeronDir" \
                 || { warn "Aeron clone failed"; aeronDir=""; }
         fi
         if [[ -n "$aeronDir" && ! -e "$aeronDir/lib/libaeron_client.so" ]]; then
@@ -480,9 +496,17 @@ cmd_paper1() {
                      -DAERON_TESTS=OFF -DAERON_SYSTEM_TESTS=OFF \
                      -DAERON_UNIT_TESTS=OFF -DAERON_BUILD_SAMPLES=OFF \
                      -DBUILD_AERON_ARCHIVE_API=OFF -DAERON_BUILD_DOCUMENTATION=OFF \
-               && cmake --build "$aeronDir/cppbuild/Release" \
-                        --target aeron_client aeronmd -j"$JOBS"; then
+               && { cmake --build "$aeronDir/cppbuild/Release" \
+                          --target aeron_client aeronmd -j"$JOBS" \
+                    || cmake --build "$aeronDir/cppbuild/Release" -j"$JOBS"; }
+            then
                 ln -sfn "cppbuild/Release/lib" "$aeronDir/lib"
+                # Some Aeron versions name the shared lib *_shared.so —
+                # provide the name tests/bench links against.
+                if [[ ! -e "$aeronDir/lib/libaeron_client.so" \
+                      && -e "$aeronDir/lib/libaeron_client_shared.so" ]]; then
+                    ln -sf libaeron_client_shared.so "$aeronDir/lib/libaeron_client.so"
+                fi
                 ok "Aeron client built."
             else
                 warn "Aeron build FAILED — bench_baseline_aeron will emit SKIPPED"
@@ -544,8 +568,8 @@ cmd_paper1() {
     fi
     # Thesis gates from papers/paper1/outline.md §1: X ≤ 50 ns, Y ≤ 30 %.
     local gate gap
-    gate="$(sed -n 's/.*gateOverheadTail}{\([0-9.]*\)}.*/\1/p' "$PAPER_DIR/numbers/numbers.tex" 2>/dev/null || true)"
-    gap="$(sed -n  's/.*aeronGapPercent}{\([0-9.]*\)}.*/\1/p'  "$PAPER_DIR/numbers/numbers.tex" 2>/dev/null || true)"
+    gate="$(sed -n 's/.*gateOverheadTail}{\(-\{0,1\}[0-9.]*\)}.*/\1/p' "$PAPER_DIR/numbers/numbers.tex" 2>/dev/null || true)"
+    gap="$(sed -n  's/.*aeronGapPercent}{\(-\{0,1\}[0-9.]*\)}.*/\1/p'  "$PAPER_DIR/numbers/numbers.tex" 2>/dev/null || true)"
     if [[ -n "$gate" ]]; then
         awk -v g="$gate" 'BEGIN{exit !(g<=50)}' \
             && ok   "Thesis gate X: gate cost ${gate} ns ≤ 50 ns  — PASS" \
