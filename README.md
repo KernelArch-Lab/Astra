@@ -140,4 +140,6 @@ which papers depend on which.
 
 ## License
 
-TBD
+Apache License 2.0 — see [LICENSE](LICENSE). (Adopted 2026-07 to match
+the artifact-evaluation commitment in
+[docs/PAPER1_REPRODUCIBILITY.md](docs/PAPER1_REPRODUCIBILITY.md).)

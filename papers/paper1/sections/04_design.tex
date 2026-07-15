@@ -88,16 +88,28 @@ We embed the slot index inside the token's identifier itself:
 \texttt{validate} then runs:
 
 \begin{verbatim}
-slot = m_arrUId[0] >> 32;
-if (slot >= max_tokens) return false;
-TokenSlot& s = pool[slot];
-if (!s.active || s.revoked_at) return false;
-if (asm_ct_compare(s.token.uid,
-                   token.uid, 16) != 0)
+if (!token.isValid())    return false;
+// epoch sanity: reject tokens claiming
+// an epoch that hasn't happened yet
+if (token.epoch > current_epoch)
     return false;
-if (token.epoch > current_epoch) return false;
-return (token.perms & required) == required;
+if ((token.perms & required) != required)
+    return false;
+slot = token.uid[0] >> 32;
+if (slot >= max_tokens)  return false;
+TokenSlot& s = pool[slot];  // 1 load
+if (!s.active.load(acquire))    return false;
+if (s.revoked_at.load(acquire)) return false;
+return asm_ct_compare(s.token.uid,
+                      token.uid, 16) == 0;
 \end{verbatim}
+
+\noindent
+The register-only checks (epoch sanity, permission subset, slot
+bounds) run before the single pool-slot load; the constant-time
+compare on the full 128-bit identifier is the final arbiter. This
+listing mirrors the shipped \texttt{CapabilityManager::validate}
+check-for-check, in order.
 
 \para{Why this is safe}
 The slot index is treated as a \textit{hint}, not a credential. An
@@ -125,20 +137,37 @@ already been allocated.
 \subsection{Cascading revocation}
 \label{sec:design:revoke}
 
-\texttt{revoke(t)} marks $t$ inactive in the pool, then walks the
-descendants of $t$ via the \texttt{m\_arrUParentId} backpointer and
-marks each of them inactive too. Each revocation increments the
-global epoch counter; tokens whose epoch number lags the current
-global epoch are rejected by validate without any further work.
+\texttt{revoke(t)} locates $t$'s slot in $O(1)$ via the same
+slot-index trick as validate, stamps the slot's
+\texttt{m\_uRevokedAtEpoch}, publishes deactivation with a release
+store, and securely wipes the token bytes
+(\texttt{asm\_secure\_wipe}). Any \texttt{validate()} that runs after
+the release store rejects on the slot flags; a racing
+\texttt{validate()} that read \texttt{active==true} just before
+deactivation still rejects, because the constant-time compare runs
+against wiped bytes. Each revoke transaction also increments a
+global epoch counter, which serves two roles: a sanity check
+(validate rejects tokens claiming a future epoch) and a shared
+timestamp for audit coherence---every token revoked in one cascade
+carries the same epoch stamp.
 
-The cascade portion is $O(d)$ where $d$ is the number of active
-descendants of the revoked token---the same complexity the seminal
-EROS pattern carries. The single-token case (the common case) is
-$O(1)$ via the slot-index trick, just like validate.
+The cascade then revokes all live descendants of $t$. Tokens carry a
+parent \emph{backpointer} (\texttt{m\_arrUParentId}) but no forward
+child list---a deliberate choice that keeps tokens fixed-size value
+types with no heap state---so the cascade discovers children by
+sweeping the bounded pool once per BFS layer: $O(N)$ per visited
+node with $N \le 4096$. We report this honestly rather than claiming
+$O(d)$: the cascade is bookkeeping that runs under the manager's
+spinlock, \emph{off} the message fastpath. The property that matters
+for the security argument---and the one we measure in
+\Cref{sec:eval:revoke}---is \emph{time-to-effect}: the interval from
+the \texttt{revoke()} call to the first rejected message, which is
+independent of pool occupancy because rejection rides on the
+$O(1)$ slot-flag check inside validate.
 
-A revoked token's slot is securely wiped (\texttt{asm\_secure\_wipe})
-to prevent stale data from being reused. The slot is freed for
-reuse on the next \texttt{create()}.
+A revoked slot is freed for reuse on the next \texttt{create()};
+because the wipe destroys the 96 random bits, a stale token can
+never match a recycled slot.
 
 \subsection{The capability gate on the IPC fastpath}
 \label{sec:design:gate}

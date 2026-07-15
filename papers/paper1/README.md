@@ -16,15 +16,19 @@ Linux x86\_64 host with the prerequisites from
 `scripts/check_paper1_env.sh`:
 
 ```bash
-./scripts/check_paper1_env.sh        # verify pdflatex, matplotlib, etc.
-./scripts/run_paper1_sweep.sh        # run every benchmark → artefact/*.csv
-papers/paper1/build.sh --refresh     # regenerate figures + numbers, build PDF
+./scripts/check_paper1_env.sh              # verify pdflatex, matplotlib, etc.
+./scripts/run_paper1_sweep.sh              # every benchmark × 5 reps → artefact/*.csv
+papers/paper1/build.sh --refresh --check   # figures + numbers + PDF + checklist
 ```
 
 On a host without the benchmark prerequisites (e.g. macOS for
 writing only), `papers/paper1/build.sh` (no `--refresh`) builds a
 structurally-complete PDF with red `[placeholder]` markers wherever
 real measurements should land. Useful for iterating on prose.
+`build.sh` auto-detects the engine: `pdflatex`+`bibtex` when
+available, otherwise `tectonic` (`brew install tectonic` on macOS).
+The USENIX style file is vendored (`usenix-2020-09.sty`) so a cold
+clone builds with no manual downloads.
 
 ---
 
@@ -33,6 +37,9 @@ real measurements should land. Useful for iterating on prose.
 ```
 ./build.sh              build PDF, assume figures/numbers exist or stub them
 ./build.sh --refresh    re-run sweep + plotters first, then build
+./build.sh --check      after building, run the internal review checklist
+                        (undefined citations, ?? refs, overfull boxes, page
+                        count, stub figures, unfilled headline numbers)
 ./build.sh --anon       force anonymous version
 ./build.sh --camera     force camera-ready (overrides \anontrue in main.tex)
 ```
@@ -45,13 +52,13 @@ real measurements should land. Useful for iterating on prose.
 
 ```
 main.tex                root document, two-column USENIX style
-macros.tex              \sysname, \validateP99 etc. — placeholder numbers
+macros.tex              \sysname, \validateTail etc. — placeholder numbers
                         default to red [todoNum] markers
 bibliography.bib        36 entries (Aeron, seL4, Cornucopia, eRPC,
                         HongMeng, CAP-VMs, LITESHIELD, …)
 
 sections/
-  00_abstract.tex       Abstract — uses \gateOverheadP99, \aeronGapPercent
+  00_abstract.tex       Abstract — uses \gateOverheadTail, \aeronGapPercent
   01_intro.tex          Intro + contribution list
   02_threat_model.tex   Threat model + non-goals
   03_background.tex     IPC and capability primer
@@ -121,33 +128,46 @@ The paper is **not numerically complete** until somebody runs
 placeholder figures are deliberately rendered in red so reviewers
 (and authors) can see at a glance what is unfilled.
 
-What remains in calendar terms before submission:
+What remains in calendar terms before submission (updated 2026-07-15):
 
-1. Bench sweep on a tuned Linux x86\_64 host (cpupower performance,
-   isolated CPU set, no SMT noise) — fills `\validateP99`,
-   `\gateOverheadP99`, `\aeronGapPercent`, `\revokeP99`, etc.
-2. Author list, affiliations, acknowledgements.
+1. **The measured sweep** on the tuned Fedora/Xeon host:
+   `./scripts/run_paper1_sweep.sh` (5 reps, ~70 min) then
+   `papers/paper1/build.sh --refresh --check` — fills every red
+   placeholder, regenerates all four data figures, and re-runs the
+   checklist. This is the only step that requires the lab machine.
+2. Author list, affiliations, acknowledgements (`main.tex`, camera-ready
+   only — the submission stays anonymous).
 3. Final pass on §7 Discussion once the actual Aeron-gap number is
-   known — the "Δ < 100 ns" framing in the abstract is conditional
-   on the measurement.
+   known, and fill the one manual number in §6.3 (`\todoNum{N}` — the
+   MPSC saturation point read off Figure 3).
 4. AE artefact submission (separate from the paper PDF) — covered by
    `docs/PAPER1_REPRODUCIBILITY.md`.
+5. Open decisions from `outline.md` §7: byline, macrobench-in-or-out
+   (outline recommends defer), anonymous artifact mirror.
+
+Everything else — buildable LaTeX (pdflatex *and* tectonic), vendored
+style file, anonymization pipeline, CI gates (build/ctest/sanitizers/
+CBMC/paper), repetition + CoV methodology, environment capture,
+LICENSE — is done and verified.
 
 ---
 
 ## Internal review checklist
 
-Before circulating a draft:
+`./build.sh --check` runs the mechanical items automatically.
+Status as of 2026-07-15 (pre-sweep):
 
-- [ ] `./build.sh --refresh` succeeds end-to-end (Linux only)
-- [ ] No red `[todoNum]` markers remain in the final PDF
-- [ ] All four required figures present and labelled
-- [ ] Bibliography has 0 "undefined citation" warnings (`grep -i "undefined.*citation" main.log`)
-- [ ] No "overfull hbox" warnings on figure pages
-- [ ] Page count ≤ venue limit (USENIX ATC: 12 pages excluding refs)
-- [ ] `submission/anonymize.sh` produces a clean anonymized variant
-- [ ] CBMC proof still passes (`make -C formal/cbmc verify` returns 0/37 failed)
-- [ ] No unresolved `\Cref{?}` markers (`grep -c "??" main.log` is 0)
+- [x] `./build.sh` succeeds end-to-end (tectonic on macOS; pdflatex on Linux)
+- [ ] `./build.sh --refresh` succeeds end-to-end (needs the Linux sweep)
+- [ ] No red `[todoNum]` markers remain in the final PDF (needs the sweep)
+- [ ] All four data figures real, not stubs (needs the sweep)
+- [x] Bibliography has 0 "undefined citation" warnings
+- [x] No overfull hboxes beyond the placeholder-driven one in §6
+- [x] Page count ≤ venue limit (11 pp incl. refs pre-numbers; 12 excl. refs allowed)
+- [x] `submission/anonymize.sh` produces a clean anonymized variant
+      (verified: builds standalone, zero identifying strings)
+- [x] CBMC proof still passes (0 of 37 failed — verified macOS + Linux container)
+- [x] No unresolved `\Cref{?}` markers
 
 ---
 

@@ -27,6 +27,14 @@ performs a release-store of the spinlock byte, which establishes the
 synchronizes-with edge any subsequent \texttt{validate()} on another
 core needs to see the new state.
 
+\texttt{revoke()} publishes deactivation in a fixed order: revoke-epoch
+stamp (release store), active-flag clear (release store), then secure
+wipe of the token bytes. A \texttt{validate()} racing the revoke
+either observes one of the two flags, or---having loaded
+\texttt{active==true} just before the clear---fails the constant-time
+compare against already-wiped bytes. There is no interleaving in
+which a revoked token validates.
+
 \para{Token-id minting}
 \texttt{generateTokenId(slot, out)} fills the 128-bit identifier from
 RDRAND (via the M-21 \texttt{asm\_rdrand64} wrapper) and packs the
@@ -144,14 +152,15 @@ machine, concatenates the CSV rows into
 \Cref{tab:artefact} maps each figure and claim to its source.
 
 \begin{table}[t]
-\centering\small
+\centering\scriptsize
+\setlength{\tabcolsep}{2pt}
 \begin{tabular}{lll}
 \toprule
 Figure / claim         & Source script         & Output \\
 \midrule
-Fig 1 latency          & \texttt{run\_paper1\_sweep.sh} \tiny\texttt{+plot 1} & \texttt{paper1\_figure\_1.pdf} \\
-Fig 2 O(1) validate    & \texttt{bench\_pool\_scaling}    \tiny\texttt{+plot 2} & \texttt{paper1\_figure\_2.pdf} \\
-Tbl 1 256\,B comparison & \texttt{plot\_paper1\_figure.py}                       & \texttt{paper1\_table\_1.tex}  \\
+Fig 1 latency          & \texttt{sweep.sh} \tiny\texttt{+plot 1} & \texttt{figure\_1.pdf} \\
+Fig 2 O(1) validate    & \texttt{bench\_pool\_scaling}    \tiny\texttt{+plot 2} & \texttt{figure\_2.pdf} \\
+Tbl 1 256\,B comparison & \texttt{plot\_paper1\_figure.py}                       & \texttt{table\_1.tex}  \\
 Throughput             & \texttt{bench\_throughput}                              & CSV                          \\
 MPSC scaling           & \texttt{bench\_throughput\_mpsc}                        & CSV                          \\
 Revoke window          & \texttt{bench\_revocation\_latency}                     & CSV                          \\
@@ -163,7 +172,8 @@ Gate concurrency       & \texttt{test\_sprint5\_gate\_concurrency}              
 Property test          & \texttt{test\_capability\_property}                     & ctest pass                   \\
 \bottomrule
 \end{tabular}
-\caption{Artefact map. Every numerical claim and every functional
+\caption{Artefact map (\texttt{sweep.sh} abbreviates
+\texttt{scripts/run\_paper1\_sweep.sh}). Every numerical claim and every functional
 correctness claim in this paper has a CI-runnable script.}
 \label{tab:artefact}
 \end{table}

@@ -117,7 +117,10 @@ def emitTable(df: pd.DataFrame, payload: int, outTex: Path) -> None:
         f.write(f"Transport ({payload}\\,B payload) & p50 (ns) & p99 (ns) & p99.99 (ns) \\\\\n")
         f.write("\\midrule\n")
         for label, p50, p99, p9999 in rows:
-            f.write(f"{label} & {p50:.0f} & {p99:.0f} & {p9999:.0f} \\\\\n")
+            # display labels may contain _ (io_uring, AF_UNIX) — the table
+            # is \input into LaTeX text mode, so escape them.
+            texLabel = label.replace("_", "\\_")
+            f.write(f"{texLabel} & {p50:.0f} & {p99:.0f} & {p9999:.0f} \\\\\n")
         f.write("\\bottomrule\n")
         f.write("\\end{tabular}\n")
     print(f"  wrote {outTex}")

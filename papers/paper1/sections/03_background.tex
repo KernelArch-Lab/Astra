@@ -63,9 +63,10 @@ fight on raw IPC RTT.
 architectural neighbour: a userspace $\mu$kernel-style runtime on
 Linux with shared-memory IPC and a ~22-syscall host interface. It has
 no capability layer. \sysname's framing is "the capability layer over
-that architectural shape"; we cite LITESHIELD prominently because (a)
-the architectural overlap is real, and (b) ATC '25 is the venue we
-are submitting to.
+that architectural shape"; we cite LITESHIELD prominently because
+the architectural overlap is real and it is the most recent
+peer-reviewed point of comparison for userspace runtimes of this
+shape.
 
 \subsection{The empty cell}
 
@@ -76,7 +77,8 @@ Aeron-class numbers)} is empty in the current literature. \sysname
 fills it.
 
 \begin{table}[t]
-\centering\small
+\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
 \begin{tabular}{lccccc}
 \toprule
 System            & Linux & no CHERI & Caps & IPC fastpath & Userspace \\

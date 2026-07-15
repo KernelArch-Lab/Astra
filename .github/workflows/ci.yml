@@ -1,0 +1,117 @@
+# =============================================================================
+# Astra Runtime — CI
+#
+# Gates every push/PR on:
+#   1. build-test   — Debug build + full ctest suite (eBPF excluded: the
+#                     bpf() syscall needs privileges GitHub runners lack;
+#                     an informational best-effort job covers it below)
+#   2. sanitize     — ASan+UBSan build + ctest
+#   3. cbmc-proof   — the capability-monotonicity proof; THE publication
+#                     gate: no PR may break it (docs/PUBLICATION_STRATEGY.md
+#                     success criterion)
+#   4. bench-build  — paper1_baselines compiles (build-only; RDTSC numbers
+#                     are never trusted from shared runners)
+# =============================================================================
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  build-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake nasm clang libbpf-dev libelf-dev \
+                                  liburing-dev linux-libc-dev pkg-config
+
+      - name: Allow unprivileged user namespaces (M-02 isolation tests)
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+
+      - name: Configure
+        run: cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DASTRA_ENABLE_TESTS=ON
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Test (eBPF excluded — needs privileged bpf())
+        run: ctest --test-dir build --output-on-failure -E "Ebpf"
+
+  ebpf-test:
+    # Informational: bpf() program loading inside shared runners is
+    # kernel/config dependent. Failures here do not gate the PR.
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake nasm clang libbpf-dev libelf-dev \
+                                  liburing-dev linux-libc-dev pkg-config
+      - name: Configure + build
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug -DASTRA_ENABLE_TESTS=ON
+          cmake --build build -j"$(nproc)"
+      - name: eBPF tests (privileged)
+        run: sudo ctest --test-dir build --output-on-failure -R "Ebpf"
+
+  sanitize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake nasm clang libbpf-dev libelf-dev \
+                                  liburing-dev linux-libc-dev pkg-config
+      - name: Allow unprivileged user namespaces
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Configure (ASan + UBSan)
+        run: |
+          cmake -B build-san -S . -DCMAKE_BUILD_TYPE=Debug \
+                -DASTRA_ENABLE_TESTS=ON -DASTRA_ENABLE_SANITIZERS=ON
+      - name: Build
+        run: cmake --build build-san -j"$(nproc)"
+      - name: Test
+        run: ctest --test-dir build-san --output-on-failure -E "Ebpf"
+
+  cbmc-proof:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install CBMC
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cbmc
+          cbmc --version
+      - name: Capability monotonicity proof
+        run: make -C formal/cbmc verify
+
+  bench-build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake nasm clang libbpf-dev libelf-dev \
+                                  liburing-dev linux-libc-dev pkg-config
+      - name: Configure (Release + benchmarks)
+        run: |
+          cmake -B build-rel -S . -DCMAKE_BUILD_TYPE=Release \
+                -DASTRA_ENABLE_TESTS=ON -DASTRA_ENABLE_BENCHMARKS=ON
+      - name: Build paper1_baselines
+        run: cmake --build build-rel --target paper1_baselines -j"$(nproc)"

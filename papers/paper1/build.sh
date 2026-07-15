@@ -3,28 +3,58 @@
 # Paper 1 build pipeline.
 #
 #   1. (optional) Re-run the sweep + plotters to refresh figures + numbers.tex
-#   2. pdflatex → bibtex → pdflatex × 2
+#   2. LaTeX build: pdflatex+bibtex when available, else tectonic
+#      (tectonic runs its own bib passes; works on macOS for prose builds)
 #
 # Usage:
 #   ./build.sh              # build PDF only (assumes figures/numbers.tex up to date)
 #   ./build.sh --refresh    # also re-run sweep + plotters first
 #   ./build.sh --anon       # produce anonymous-version PDF (default if \anontrue)
 #   ./build.sh --camera     # produce camera-ready PDF (overrides \anontrue)
+#   ./build.sh --check      # after building, run the internal review checklist
 # =============================================================================
 set -euo pipefail
 
 REFRESH=0
+CHECK=0
 MODE=""
 for arg in "$@"; do
     case "$arg" in
         --refresh) REFRESH=1 ;;
+        --check)   CHECK=1 ;;
         --anon)    MODE="anon" ;;
         --camera)  MODE="camera" ;;
-        -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+        -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     esac
 done
 
 cd "$(dirname "$0")"
+
+# --- Engine selection --------------------------------------------------------
+ENGINE=""
+if command -v pdflatex >/dev/null 2>&1 && command -v bibtex >/dev/null 2>&1; then
+    ENGINE="pdflatex"
+elif command -v tectonic >/dev/null 2>&1; then
+    ENGINE="tectonic"
+else
+    echo "ERROR: need either pdflatex+bibtex or tectonic on PATH" >&2
+    echo "  Fedora:  sudo dnf install texlive-scheme-medium" >&2
+    echo "  macOS:   brew install tectonic" >&2
+    exit 3
+fi
+echo "==> LaTeX engine: $ENGINE"
+
+compile_standalone () {
+    # $1 = .tex file (compiled in its own directory)
+    local tex="$1"
+    local dir; dir="$(dirname "$tex")"
+    local base; base="$(basename "$tex")"
+    if [[ "$ENGINE" == "pdflatex" ]]; then
+        (cd "$dir" && pdflatex -interaction=nonstopmode -halt-on-error "$base" >/dev/null)
+    else
+        (cd "$dir" && tectonic "$base" >/dev/null 2>&1)
+    fi
+}
 
 if [[ $REFRESH -eq 1 ]]; then
     echo "==> Refreshing figures + numbers.tex"
@@ -46,16 +76,17 @@ if [[ $REFRESH -eq 1 ]]; then
         ../../artefact/paper1_figure_1.csv \
         ../../artefact/paper1_pool_scaling.csv \
         ../../artefact/paper1_revocation.csv \
-        > numbers/numbers.tex || true
+        > numbers/numbers.tex
 
     python3 ../../scripts/gen_table_perf.py \
         ../../artefact/paper1_perfcounters.csv \
-        > numbers/table_perf.tex || true
+        > numbers/table_perf.tex
+fi
 
-    # Build the gate_path TikZ standalone if not already a PDF.
-    if [[ ! -f figures/gate_path.pdf || figures/gate_path.tex -nt figures/gate_path.pdf ]]; then
-        (cd figures && pdflatex -interaction=nonstopmode -halt-on-error gate_path.tex || true)
-    fi
+# Build the gate_path TikZ standalone if not already a PDF.
+if [[ ! -f figures/gate_path.pdf || figures/gate_path.tex -nt figures/gate_path.pdf ]]; then
+    echo "==> Building gate_path.pdf (TikZ standalone)"
+    compile_standalone figures/gate_path.tex
 fi
 
 # Apply mode override.
@@ -75,17 +106,11 @@ mkdir -p numbers figures
 # ---------------------------------------------------------------------------
 # Stub PDFs for figures the sections \includegraphics{}.
 #
-# Without these, pdflatex on a cold-clone (no --refresh, no sweep run yet)
-# fails because the figure paths don't resolve. We build ONE stub.pdf
-# (a single pdflatex pass on a tiny \fbox stub) and copy it to each
-# missing figure target. The result: a buildable PDF where every missing
-# figure is rendered as a labelled "[Figure X — run --refresh]" box.
-#
-# This block is a NO-OP when the real PDFs already exist (refresh did them,
-# or a previous build did this stub pass — first-build-only cost).
+# Without these, a cold-clone build (no --refresh, no sweep run yet) fails
+# because the figure paths don't resolve. Every missing figure becomes a
+# labelled red "[Figure placeholder]" box. NO-OP when real PDFs exist.
 # ---------------------------------------------------------------------------
 REQUIRED_FIGS=(
-    figures/gate_path.pdf
     figures/paper1_figure_1.pdf
     figures/paper1_figure_2.pdf
     figures/paper1_figure_3_mpsc.pdf
@@ -96,8 +121,8 @@ for f in "${REQUIRED_FIGS[@]}"; do
     [[ -f "$f" ]] || { NEED_STUB=1; break; }
 done
 
-if [[ $NEED_STUB -eq 1 ]] && command -v pdflatex >/dev/null 2>&1; then
-    echo "==> Some figure PDFs missing — building stubs (one pdflatex pass)"
+if [[ $NEED_STUB -eq 1 ]]; then
+    echo "==> Some figure PDFs missing — building stubs (one $ENGINE pass)"
     STUB_DIR="$(mktemp -d)"
     cat > "$STUB_DIR/_stub.tex" <<'STUB_TEX'
 \documentclass[border=2mm]{standalone}
@@ -110,23 +135,27 @@ if [[ $NEED_STUB -eq 1 ]] && command -v pdflatex >/dev/null 2>&1; then
     after \texttt{./scripts/run\_paper1\_sweep.sh}.}}
 \end{document}
 STUB_TEX
-    ( cd "$STUB_DIR" && pdflatex -interaction=nonstopmode -halt-on-error _stub.tex >/dev/null 2>&1 )
+    compile_standalone "$STUB_DIR/_stub.tex" || true
     if [[ -f "$STUB_DIR/_stub.pdf" ]]; then
         for f in "${REQUIRED_FIGS[@]}"; do
-            [[ -f "$f" ]] || cp "$STUB_DIR/_stub.pdf" "$f"
+            [[ -f "$f" ]] || { cp "$STUB_DIR/_stub.pdf" "$f"; touch "${f}.STUB"; }
         done
-        echo "==> Stub PDFs in place: $(printf '%s ' "${REQUIRED_FIGS[@]}")"
+        echo "==> Stub PDFs in place (each marked with a .STUB sidecar)"
     else
-        echo "==> WARNING: stub pdflatex failed; main.tex may not build"
+        echo "==> WARNING: stub build failed; main.tex may not build"
     fi
     rm -rf "$STUB_DIR"
 fi
 
-# Plain LaTeX pipeline.
-pdflatex -interaction=nonstopmode -halt-on-error main.tex
-bibtex   main || true
-pdflatex -interaction=nonstopmode -halt-on-error main.tex
-pdflatex -interaction=nonstopmode -halt-on-error main.tex
+# --- Main build --------------------------------------------------------------
+if [[ "$ENGINE" == "pdflatex" ]]; then
+    pdflatex -interaction=nonstopmode -halt-on-error main.tex
+    bibtex   main
+    pdflatex -interaction=nonstopmode -halt-on-error main.tex
+    pdflatex -interaction=nonstopmode -halt-on-error main.tex
+else
+    tectonic --keep-logs main.tex
+fi
 
 # Restore main.tex if we modified it.
 [[ -f main.tex.bak ]] && mv main.tex.bak main.tex
@@ -134,3 +163,50 @@ pdflatex -interaction=nonstopmode -halt-on-error main.tex
 echo
 echo "==> Built main.pdf"
 ls -lh main.pdf
+
+# --- Internal review checklist (papers/paper1/README.md) ---------------------
+if [[ $CHECK -eq 1 ]]; then
+    echo
+    echo "==> Internal review checklist"
+    FAIL=0
+
+    UNDEF=$(grep -ci "undefined citation\|Reference .* undefined" main.log || true)
+    if [[ "$UNDEF" -eq 0 ]]; then echo "  OK   0 undefined citations/references"
+    else echo "  FAIL $UNDEF undefined citations/references"; FAIL=1; fi
+
+    QQ=$(grep -c '??' main.log || true)
+    if [[ "$QQ" -eq 0 ]]; then echo "  OK   no unresolved ?? markers"
+    else echo "  FAIL $QQ unresolved ?? markers in main.log"; FAIL=1; fi
+
+    OVERFULL=$(grep -c 'Overfull \\hbox' main.log || true)
+    if [[ "$OVERFULL" -eq 0 ]]; then echo "  OK   no overfull hboxes"
+    else echo "  WARN $OVERFULL overfull hboxes (inspect figure pages)"; fi
+
+    PAGES=$(grep -oE 'Output written on .*\(([0-9]+) pages' main.log | grep -oE '[0-9]+ pages' | grep -oE '[0-9]+' || echo 0)
+    echo "  INFO total pages (incl. refs): ${PAGES:-unknown}  (ATC limit: 12 excl. refs)"
+
+    STUBS=$(ls figures/*.STUB 2>/dev/null | wc -l | tr -d ' ')
+    if [[ "$STUBS" -eq 0 ]]; then echo "  OK   no stub figures — all figures are real"
+    else echo "  TODO $STUBS figure(s) still stubs (need the Linux sweep)"; fi
+
+    # Which headline numbers are still placeholders? A macro is "filled"
+    # when numbers/numbers.tex \renewcommand's it after a sweep.
+    # The 11 macros gen_numbers_tex.py emits — keep the two lists in sync.
+    MACROS=(validateMedian validateTail validateFourNines
+            rawAstraRTT gatedAstraRTT aeronRTT iouringRTT pipeRTT
+            gateOverheadTail aeronGapPercent revokeTail)
+    MISSING=()
+    for m in "${MACROS[@]}"; do
+        grep -q "renewcommand{\\\\$m}" numbers/numbers.tex 2>/dev/null || MISSING+=("$m")
+    done
+    if [[ ${#MISSING[@]} -eq 0 ]]; then
+        echo "  OK   all headline numbers filled by numbers/numbers.tex"
+    else
+        echo "  TODO ${#MISSING[@]} headline numbers still red placeholders:"
+        printf '         %s\n' "${MISSING[@]}"
+    fi
+
+    echo
+    if [[ $FAIL -eq 0 ]]; then echo "==> Checklist: no hard failures."
+    else echo "==> Checklist: HARD FAILURES above."; exit 4; fi
+fi
