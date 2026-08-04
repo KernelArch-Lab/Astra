@@ -1,25 +1,24 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-We presented \sysnamefull, a userspace runtime that mediates every
-zero-copy IPC message through a 128-bit capability token on stock
-Linux. The headline contribution is a slot-indexed validate path
-that costs \gateOverheadTail\,ns per message at p99 while preserving
-$2^{96}$-bit forgery resistance and supporting Cornucopia\,Reloaded-class
-cascading revocation in software at the application layer, with
-$O(1)$ time-to-effect independent of pool occupancy.
-\sysname's gated round-trip latency lands within \aeronGapPercent\%
-of Aeron's published 250\,ns floor across payload sizes from 64\,B
-to 16\,KiB; revocation takes effect within \revokeTail\,$\mu$s of the
-\texttt{revoke()} call; and the gate scales linearly under MPSC
-contention with up to 16 producers.
+\sysnamefull mediates every zero-copy IPC message on stock Linux
+through an unforgeable 128-bit capability token, and does it cheaply
+enough to matter. The slot-indexed validate path costs
+\gateOverheadTail\,ns per message at p99 while keeping a $2^{96}$
+forgery space; the gated round trip stays within \aeronGapPercent\%
+of Aeron's published 250\,ns floor from 64\,B to 16\,KiB payloads;
+revocation takes effect within \revokeTail\,$\mu$s of the
+\texttt{revoke()} call; and the gate scales through 16-producer MPSC
+contention. None of that required a kernel patch, a hypervisor, or
+capability hardware.
 
-The work is one entry in a larger effort to make capability discipline
-a default for userspace runtimes that mediate untrusted code on
-commodity hardware, including LLM-agent tool execution
-(M-22 AgentGuard) and confidential-compute attestation
-(M-23 ConfCompute). Both are in preparation as follow-up papers.
+We see this as one piece of a larger argument: that capability
+discipline can become the default for userspace runtimes that broker
+untrusted code on commodity machines---including LLM-agent tool
+execution (M-22 AgentGuard) and confidential-compute attestation
+(M-23 ConfCompute), both in preparation as follow-up papers.
 
-The artefact is open source and a single command,
+The artefact is open source. One command,
 \texttt{scripts/run\_paper1\_sweep.sh}, reproduces every figure on a
-fresh Fedora 39+ machine with no internet access required.
+fresh Fedora x86-64 machine, no internet access required for the
+required baselines.

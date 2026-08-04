@@ -1,92 +1,85 @@
-\section{Related work --- extended}
+\section{Related work}
 \label{sec:rw}
 
-\subsection{Capability-based operating systems}
+\subsection{Capability operating systems}
 
-The capability discipline traces to Dennis~\&\
-Van~Horn~\cite{dennis1966}; Hydra and StarOS in the 1970s carried it
-forward. Redell's thesis~\cite{redell74} introduced the
-epoch-versioned credential pattern for revocation, the algorithmic
-ancestor of every capability-revocation system since. KeyKOS,
-EROS~\cite{shapiro1999eros}, and CapROS~\cite{capros} demonstrated
-the pattern at OS scale; Coyotos refined the typing
-discipline. seL4~\cite{klein2009sel4} closed the loop with full
-functional-correctness verification.
+Capabilities trace to Dennis and Van~Horn~\cite{dennis1966}, with
+Hydra and StarOS carrying the idea through the 1970s. Redell's
+thesis~\cite{redell74} contributed the epoch-versioned credential,
+the ancestor of every revocable-capability scheme since, ours
+included. KeyKOS, EROS~\cite{shapiro1999eros}, and
+CapROS~\cite{capros} ran the pattern at OS scale, Coyotos refined the
+typing discipline, and seL4~\cite{klein2009sel4} finished the arc
+with full functional-correctness verification.
 
-Recent capability-system work splits along the question of whether
-capability identifiers should be \textit{names} (KeyKOS-style) or
-\textit{addresses} (CHERI-style). \sysname's tokens are names, with
-the slot index serving as a deterministic address-like hint
-(\Cref{sec:design:fastpath}); we get the cache behaviour of
-addresses without losing the forgeability resistance of names.
+More recent work splits on whether capability identifiers should be
+\textit{names} (KeyKOS-style) or \textit{addresses} (CHERI-style).
+Our tokens are names that smuggle in an address-like hint---the slot
+index of \Cref{sec:design:fastpath}---which buys the cache behaviour
+of addresses without surrendering the unforgeability of names.
 
-\subsection{Hardware-capability systems}
+\subsection{Hardware capability systems}
 
-CHERI~\cite{cheri-asplos15,cheri-tcg22} is the most-developed
-hardware-capability platform; CAP-VMs~\cite{capvms} layers
-capability-isolation on CHERI/Morello.
-Cornucopia\,Reloaded~\cite{cornucopia-reloaded} is the recent peer for
-the revocation pattern itself; the algorithm \sysname uses is theirs,
-but our realisation is software-only on stock Linux.
-PICASSO~\cite{picasso} (S\&P~'24) takes a hardware-provenance approach
-to bulk invalidation that has a similar effect.
+CHERI~\cite{cheri-asplos15,cheri-tcg22} is the most developed
+hardware-capability platform, and CAP-VMs~\cite{capvms} builds
+capability isolation for cloud microservices on top of
+CHERI/Morello. Cornucopia\,Reloaded~\cite{cornucopia-reloaded} is the
+modern peer for the revocation pattern itself; we use their
+algorithm, realised in software on stock Linux.
+PICASSO~\cite{picasso} (S\&P~'24) reaches a similar bulk-invalidation
+effect through hardware provenance.
 
 \subsection{Userspace IPC primitives}
 
-Aeron~\cite{aeron-real-logic} is the most-published Aeron-class
-single-host IPC number we are aware of. ByteDance's
-shmipc~\cite{bytedance-shmipc} is production-deployed in Service
-Mesh and is architecturally similar.
-io\_uring~\cite{iouring} prototyped the same template (mmap'd
-SQ/CQ rings with futex notification) inside the Linux kernel; our
-ring buffer is an above-the-kernel reuse of that template.
-
-eRPC~\cite{erpc} (NSDI '19) is the published peer-reviewed RPC
-number with the lowest latency we are aware of (~2.3\,$\mu$s
-single-hop request/response over DPDK).
-LITESHIELD~\cite{liteshield} (USENIX ATC '25) is the most-recent
-userspace $\mu$kernel-style runtime on Linux; the architectural
-overlap is real (ours adds the capability layer).
-Cap'n~Proto's RPC layer~\cite{capnproto-rpc} sits at a higher
-level---marshalling and authorization on top of a transport---and is
-not a fair comparison for raw IPC RTT.
+Aeron~\cite{aeron-real-logic} publishes the best single-host IPC
+latency we are aware of, and ByteDance's
+shmipc~\cite{bytedance-shmipc} deploys the same architectural idea in
+production service meshes. io\_uring~\cite{iouring} put the
+template---mmap'd SQ/CQ rings, futex-style notification---inside the
+kernel; our ring buffer reuses it above the kernel. eRPC~\cite{erpc}
+(NSDI~'19) holds the lowest peer-reviewed RPC latency we know
+($\sim$2.3\,$\mu$s single-hop over DPDK).
+LITESHIELD~\cite{liteshield} (USENIX ATC~'25) is the most recent
+userspace microkernel-style runtime on Linux; the structural overlap
+with \sysname is real, and the capability layer is what we add on
+top of that shape. Cap'n~Proto's RPC layer~\cite{capnproto-rpc}
+lives higher in the stack---marshalling and authorisation over a
+transport---so we do not treat it as a raw-RTT comparison.
 
 \subsection{Kernel-resident capability systems on Linux}
 
-HongMeng~\cite{hongmeng} (OSDI '24) and CertiKOS~\cite{certikos} are
+HongMeng~\cite{hongmeng} (OSDI~'24) and CertiKOS~\cite{certikos} are
 the closest kernel-resident capability systems with Linux-compatible
-positioning. \sysname's contribution is sitting above them in the
-stack rather than competing with them in it. Our framing borrows
-from HongMeng's own authors' analysis of the tradeoff between pure
-capabilities and address tokens (\Cref{sec:disc:hongmeng}).
+ambitions. We sit above them in the stack rather than competing
+inside it, and our framing leans on HongMeng's own account of the
+trade-off between pure capability chains and address tokens
+(\Cref{sec:disc:hongmeng}).
 
 \subsection{Confidential-compute capability binding}
 
-Recent confidential-compute work has begun to explore capability
-mediation tied to attestation reports.
-ScaleTrust~\cite{scaletrust} discusses TDX-bound credentials;
-Conclave~\cite{conclave} discusses SEV-SNP-sealed objects.
-\sysname's design intentionally leaves this to follow-up work
-(M-23~ConfCompute) and stays within the Linux process boundary.
+Confidential-compute work has started tying capability mediation to
+attestation: ScaleTrust~\cite{scaletrust} explores TDX-bound
+credentials, Conclave~\cite{conclave} SEV-SNP-sealed objects. We
+deliberately leave that binding to follow-up work (M-23 ConfCompute)
+and keep this paper inside the Linux process boundary.
 
 \subsection{LLM-agent sandboxing}
 
-The Anthropic Computer Use~\cite{anthropic-cu}, OpenAI Agents
-SDK~\cite{openai-agents}, and Devin~\cite{devin} stacks all sandbox
-agent tool calls; none currently expose a capability layer above the
-syscall boundary. NIST AI~600-1~\cite{nist-ai-600-1} and EU AI Act
-Article~15~\cite{euaiact15} demand verifiable mediation. We see
-\sysname as the runtime substrate this demand will pull into
-existence; the AgentGuard module (M-22 in our roadmap) is in
-preparation as Paper~3.
+Anthropic's Computer Use~\cite{anthropic-cu}, the OpenAI Agents
+SDK~\cite{openai-agents}, and Devin~\cite{devin} all sandbox agent
+tool calls today, and none exposes a capability layer above the
+syscall boundary. With NIST AI~600-1~\cite{nist-ai-600-1} and EU AI
+Act Article~15~\cite{euaiact15} demanding verifiable mediation, we
+read \sysname as the substrate that demand will eventually pull into
+existence; the AgentGuard module (M-22) is in preparation as a
+follow-up paper.
 
 \subsection{Formal verification}
 
-CBMC~\cite{cbmc} bounded-model checking is the technique we use for
-the monotonicity proof; SPIN~\cite{spin} would have been an
-alternative for the LTL fragment, but our property is a quantifier-free
-boolean and CBMC is more direct. Our scope (one property, 280 LOC C
-model, 37 checks) is many orders of magnitude smaller than the
-seL4 effort~\cite{klein2009sel4} and we frame it as
-\textit{spec-correspondence}, not as functional correctness in seL4's
-sense.
+We use CBMC~\cite{cbmc} for the monotonicity proof.
+SPIN~\cite{spin} could have handled an LTL formulation, but our
+property is a quantifier-free boolean over bitmasks and CBMC states
+it directly. The scope---one property, a 280-line C model, 37
+checks---is orders of magnitude below the seL4
+effort~\cite{klein2009sel4}, and we call it what it is:
+spec correspondence, not functional correctness.

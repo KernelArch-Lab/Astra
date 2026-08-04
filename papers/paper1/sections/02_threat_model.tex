@@ -1,10 +1,10 @@
 \section{Threat model}
 \label{sec:threat}
 
-\sysname operates above the Linux kernel as a userspace runtime
-shared by mutually-distrusting components within a single host. We
-identify the trust boundary explicitly because Paper 1's claims live
-or die by where it is drawn.
+\sysname runs above the Linux kernel as a userspace runtime shared by
+mutually distrusting components on a single host. We draw the trust
+boundary explicitly here, because everything the paper claims depends
+on where it sits.
 
 \para{Trusted}
 \begin{itemize}
@@ -13,72 +13,67 @@ or die by where it is drawn.
 on \texttt{mmap(MAP\_SHARED)} backed by \texttt{memfd\_create}, on
 \texttt{seccomp-BPF} for syscall filtering, and on
 \texttt{CLONE\_NEWUSER}/\texttt{CLONE\_NEWNS} for namespace isolation.
-\item The \sysname runtime's own pages, including the
-\texttt{CapabilityManager} pool of token slots, the
-\texttt{ChannelControlBlock}s of any IPC channels that have been
-established, and the M-21 constant-time NASM primitives.
-\item RDRAND as a uniformly-random source. We use 96 bits of RDRAND per
-token; a compromised RDRAND would shrink the forgery space.
+\item The runtime's own pages: the \texttt{CapabilityManager} slot
+pool, the \texttt{ChannelControlBlock} of every established channel,
+and the M-21 constant-time NASM primitives.
+\item RDRAND as a uniform randomness source. Each token consumes 96
+bits of it; a compromised RDRAND shrinks the forgery space
+accordingly.
 \end{itemize}
 
 \para{Untrusted}
 \begin{itemize}
 \itemsep0pt
-\item Any process holding a \captoken. The bits of the token may be
-arbitrary---we assume the holder may forge, mutate, replay, or simply
-guess a token's 128-bit identifier.
-\item Any byte that crosses an IPC channel. The runtime must not be
-induced to take any state-altering action by parsing untrusted bytes;
-in particular, the IPC framing itself (header parsing, sequence
-numbers) must be safe under arbitrary input.
-\item The peer endpoint of a channel. A capability-bearing producer
-may misbehave (publish wrong-shaped messages, withhold messages,
-flood). The capability gate at the consumer protects the consumer
-from the producer; the producer's gate protects \sysname from the
-producer attempting to publish past its revocation.
+\item Any process holding a \captoken. The token's bits may be
+anything---we assume the holder can forge, mutate, replay, or simply
+guess identifiers.
+\item Every byte that crosses a channel. Parsing untrusted input
+(framing, headers, sequence numbers) must never push the runtime into
+a state-altering action.
+\item The peer endpoint. A capability-bearing producer may misbehave:
+publish garbage, withhold messages, flood. The consumer's gate
+protects the consumer from the producer; the producer's gate protects
+\sysname from a producer trying to publish past its own revocation.
 \end{itemize}
 
 \para{In scope: forgery, replay, use-after-revoke}
-The capability check must reject:
+Validation must reject
 \textit{(a)} a token whose 128-bit identifier is not currently active
 in the pool (forgery);
-\textit{(b)} a token whose 128-bit identifier was once active but has
-since been revoked, including via cascading revocation of an ancestor
-(use-after-revoke);
-\textit{(c)} a token that bears the correct identifier but whose
-permission bitmask does not include the requested operation (privilege
-escalation).
+\textit{(b)} a token whose identifier was once active but has been
+revoked, including through cascading revocation of an ancestor
+(use-after-revoke); and
+\textit{(c)} a token with a correct identifier whose permission mask
+does not cover the requested operation (privilege escalation).
+The slot-indexed validate path (\Cref{sec:design:fastpath}) does not
+weaken any of this: the slot index in the high 32 bits is a hint, not
+a credential, and the constant-time compare over the full 128 bits
+still has to match.
 
-The slot-indexed validate path (\Cref{sec:design:fastpath}) keeps the
-forgery space at $2^{96}$: the slot index in the high 32 bits is
-\textit{treated as a hint}, not as a credential, because the
-constant-time compare on the full 128 bits still has to match.
+\para{In scope: side channels in the gate}
+The comparison must not reveal which byte differed first, and the
+runtime must not take observably different paths based on token
+contents beyond the accept/reject bit. The 128-bit identifier match
+uses the M-21 \texttt{asm\_ct\_compare} primitive, which is
+constant-time and barrier-balanced. The slot index \emph{is} read
+before the constant-time compare, but only to pick a pool offset; an
+attacker steering the slot index cannot induce distinguishable cache
+behaviour across pool sizes (\Cref{sec:eval:perfctrs}).
 
-\para{In scope: side-channels in the gate}
-The capability comparison must not leak which byte differs first, and
-the runtime must not take observably different paths based on a
-token's contents past the binary accept/reject decision. We use the
-M-21 \texttt{asm\_ct\_compare} primitive for the 128-bit identifier
-match; it is constant-time and barrier-balanced. The slot index
-\textit{is} consulted before the constant-time compare, but only to
-choose a pool offset---an attacker who controls the slot index cannot
-induce different cache behaviour across pool sizes (see
-\Cref{sec:eval:perfctrs}).
+\para{Out of scope: rowhammer-class faults, kernel TCB bypass}
+We do not defend against rowhammer corruption of the token pool,
+against speculative execution that pierces the kernel TCB (HongMeng's
+territory~\cite{hongmeng}), or against an attacker who can already
+write \sysname's process memory. If Linux process isolation fails,
+so do we.
 
-\para{Out of scope: rowhammer-class faults, full kernel TCB bypass}
-We do not defend against rowhammer-induced corruption of the token
-pool, against speculative execution that pierces the kernel TCB
-(those threats are HongMeng's territory~\cite{hongmeng}), or against
-an attacker who can already write to \sysname's process memory.
-\sysname assumes Linux's process isolation works.
-
-\para{Out of scope: cross-host capability delegation}
-Paper 1 is single-host. Cross-host delegation, attestation handshakes,
-and remote-capability transfer are the subject of follow-up work
+\para{Out of scope: cross-host delegation}
+This paper is single-host. Cross-host delegation, attestation
+handshakes, and remote token transfer belong to follow-up work
 (M-23 ConfCompute, in preparation~\cite{astra-confcompute}).
 
 \para{Out of scope: hardware capability enforcement}
-We do not assume CHERI, Morello, MTE, or LAM. CAP-VMs~\cite{capvms}
-operates in the same conceptual layer but requires CHERI hardware;
-\sysname's contribution is making the same conceptual layer available
-on commodity x86-64 / aarch64.
+We assume no CHERI, Morello, MTE, or LAM. CAP-VMs~\cite{capvms} lives
+at the same conceptual layer but needs CHERI silicon; making that
+layer available on commodity x86-64 and aarch64 is precisely the
+point of \sysname.

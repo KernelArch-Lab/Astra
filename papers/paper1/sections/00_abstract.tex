@@ -1,34 +1,35 @@
-Userspace runtimes that mediate untrusted code on commodity Linux face a
-recurring tension: they want \textit{capability-grade} access control on every
-inter-component message, but the IPC mechanisms with the strongest security
-guarantees (seL4, CHERI-based systems) require kernel modifications or
-specialised hardware that are not deployable to existing fleets, while the
-fastest userspace IPC primitives (Aeron, io\_uring, eRPC) provide no
-capability layer at all.
+Userspace runtimes that broker untrusted code on commodity Linux are
+stuck choosing between two kinds of IPC. The mechanisms with a real
+security story---seL4's capabilities, CHERI-backed isolation---demand a
+new kernel or new silicon, neither of which can be rolled out to an
+existing fleet. The mechanisms that are actually fast on stock
+Linux---Aeron, io\_uring, eRPC---will happily deliver a message from
+anyone to anyone.
 
-We present \sysnamefull, the first userspace runtime to enforce
-capability-token-mediated access control on a zero-copy memfd IPC fastpath
-on stock Linux, without kernel modification, special hardware, or
-hypervisor support. \sysname binds a 128-bit unforgeable token to each
-endpoint of every IPC channel and validates the token on \emph{every}
-message at producer and consumer.
+\sysnamefull closes that gap. It is, to our knowledge, the first
+userspace runtime to put capability-token access control on a
+zero-copy memfd IPC fastpath on stock Linux: no kernel patch, no
+special hardware, no hypervisor. Each endpoint of every channel holds
+an unforgeable 128-bit token, and every message---once at the
+producer, again at the consumer---must pass validation before it
+moves.
 
-The headline contribution is a \emph{slot-indexed validate path} that
-collapses what would naturally be an $O(n)$ pool scan into a single shift,
-one cache load, and one constant-time compare, while preserving a
-$2^{96}$-bit forgery space. We measure a per-message gate cost of
-\gateOverheadTail ns at p99 across payload sizes 64 B--16 KiB, keeping
-\sysname's gated round-trip latency within \aeronGapPercent\% of Aeron's
-published 250\,ns floor, while delivering Cornucopia\,Reloaded-class
-cascading revocation in software at the application layer, with
-\textit{O(1)} time-to-effect independent of pool occupancy.
-We additionally show that revocation takes effect within \revokeTail\,$\mu$s of
-the \texttt{revoke()} call (end-to-end, including drain), survives MPSC
-contention with up to 16 producers, and is verified against a hand-rolled
-property-based oracle and a CBMC bounded-model proof of capability
+The check is affordable because of a \emph{slot-indexed validate
+path}, which collapses what would naturally be an $O(n)$ pool scan
+into a single shift, one cache load, and one constant-time compare,
+while keeping a $2^{96}$ forgery space. We measure a per-message gate
+cost of \gateOverheadTail\,ns at p99 across payloads from 64\,B to
+16\,KiB, which holds \sysname's gated round trip within
+\aeronGapPercent\% of Aeron's published 250\,ns floor while providing
+Cornucopia\,Reloaded-class cascading revocation in software, with
+$O(1)$ time-to-effect regardless of pool occupancy. Revocation lands
+within \revokeTail\,$\mu$s of the \texttt{revoke()} call, end to end
+including drain; the gate survives MPSC contention with up to 16
+producers; and the implementation is checked against a hand-written
+property-based oracle and a CBMC bounded-model proof of permission
 monotonicity.
 
-Our evaluation covers a peer-set of pipe(2), socketpair, io\_uring,
-Aeron, and eRPC, all measured in the same TSC domain on a single
-machine. Source, baseline harnesses, and a one-command artefact-evaluation
-sweep are publicly available.
+Our evaluation runs pipe(2), socketpair, io\_uring, Aeron, and eRPC
+head-to-head, all in the same TSC domain on one machine. Source,
+baseline harnesses, and a one-command artefact-evaluation sweep
+accompany the paper.
