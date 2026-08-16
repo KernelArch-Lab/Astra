@@ -114,6 +114,30 @@ inline bool pinSelf(std::size_t index)
 #endif
 }
 
+// Pin the calling thread to ALL benchmark CPUs rather than one.
+//
+// For harnesses that need more threads than we have isolated cores. Aeron
+// is the case in point: besides our measuring thread and echo thread, its
+// client spawns a conductor internally, and a child inherits its creator's
+// affinity mask. Give each a single core and three busy-spinners land on
+// one, where — with nohz_full suppressing the timer tick — they starve each
+// other into what looks exactly like a hang. Sharing the isolated set keeps
+// them off the rest of the system while leaving the scheduler free to place
+// them.
+inline bool pinSelfAll()
+{
+#if defined(__linux__)
+    static const std::vector<int> cpus = benchCpus();
+    if (cpus.empty()) return false;
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    for (int c : cpus) CPU_SET(static_cast<std::size_t>(c), &set);
+    return ::pthread_setaffinity_np(::pthread_self(), sizeof(set), &set) == 0;
+#else
+    return false;
+#endif
+}
+
 // Announce the pinning decision once, on stderr, so the sweep log records
 // which cores produced the numbers.
 inline void reportPinning(const char* who)

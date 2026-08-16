@@ -140,7 +140,13 @@ uint64_t oneTrial(int poolActive, double tscPerNs)
 int main()
 {
     astra_bench::reportPinning("bench_revocation_latency");
-    astra_bench::pinSelf(0);
+    // Index 1, deliberately NOT 0. The producer owns core 0 and busy-spins
+    // there; what we measure is how quickly IT observes the denial, so it
+    // must not share. Putting main on core 0 alongside it made revoke()
+    // contend with that spin loop and the "revocation window" became a
+    // scheduler round trip — 1.3 us inflated to 281 us. Main shares with
+    // the consumer instead, whose timing we do not measure.
+    astra_bench::pinSelf(1);
     const double tscPerNs = astra_bench::tscPerNs();
     std::printf("transport,pool_active,trial,window_ns\n");
 

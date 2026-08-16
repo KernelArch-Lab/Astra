@@ -82,6 +82,7 @@ void runPayload(std::size_t payload, std::size_t iters, double tscPerNs)
 
     std::atomic<bool> stop{false};
     std::thread echo([&]() {
+        astra_bench::pinSelfAll();
         // AtomicBuffer takes (uint8_t*, size_t) — no narrowing cast.
         aeron::concurrent::AtomicBuffer scratch(rx.data(), rx.size());
         aeron::FragmentAssembler asm_(
@@ -138,7 +139,11 @@ void runPayload(std::size_t payload, std::size_t iters, double tscPerNs)
 int main()
 {
     astra_bench::reportPinning("baseline_aeron");
-    astra_bench::pinSelf(0);
+    // The isolated SET, not one core. Aeron's client spawns a conductor
+    // thread of its own, so this harness needs three threads; pinning each
+    // to a single core puts all three busy-spinners on one (children inherit
+    // the creator's mask) and they starve one another indefinitely.
+    astra_bench::pinSelfAll();
     const double tscPerNs = astra_bench::tscPerNs();
     astra_bench::printCsvHeader();
 
