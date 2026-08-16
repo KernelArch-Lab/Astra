@@ -34,8 +34,12 @@ appears in our evaluation for one reason: to establish that the
 fastpath we bolt a capability gate onto is a real one. A cheap gate
 over a slow substrate would prove nothing.
 
-\sysname measures faster than Aeron here, and we want to be precise
-about why that is not the claim it might appear to be. Aeron's
+\sysname measures faster than Aeron here---\gatedAstraRTT\,ns against
+\aeronRTT\,ns at 256\,B p99---and we want to be precise about why that
+is not the claim it might appear to be. A gap of that size should
+raise a reader's suspicion rather than their confidence, and it raises
+ours: an order of magnitude is the signature of two systems doing
+different amounts of work, not of one being better engineered. Aeron's
 architecture buys properties we do not attempt:
 
 \begin{itemize}
@@ -63,9 +67,10 @@ a credible baseline rather than a strawman.
 One methodological note. Aeron's p50 on our platform lands close to
 its published figure, which gives us confidence the harness is
 faithful; its p99 is inflated by scheduling jitter that a dedicated
-server would not show. We therefore treat Aeron's tail on this
-machine as a property of the machine, not of Aeron, and we do not
-build any argument on it.
+server would not show, and by the fact that it is the one harness we
+cannot pin to the isolated cores (\Cref{sec:eval:threats}). We
+therefore treat Aeron's tail on this machine as a property of the
+machine, not of Aeron, and we do not build any argument on it.
 
 \subsection{Reading HongMeng}
 \label{sec:disc:hongmeng}
