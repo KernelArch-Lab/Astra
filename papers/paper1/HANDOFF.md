@@ -62,12 +62,11 @@ submission whether to quote a range, add cross-run spread to
    because its pull had landed on `8478ebc`, before the fix was
    committed. Check `git log -1 --format=%h` before re-diagnosing a
    repeat failure.
-2. **Two red markers are still in the PDF.** The checklist line "all
+2. **One red marker is still in the PDF.** The checklist line "all
    headline numbers filled" covers only the 11 macros
    `gen_numbers_tex.py` emits — it does not see inline `\todoNum{}`
-   uses. `\todoNum{N}` in §6.3 and `\todoNum{o(n) scan at 4096 ns}` in
-   §6.2 still render red. Do not read that checklist line as "no red
-   markers left."
+   uses. `\todoNum{N}` in §6.3 still renders red. Do not read that
+   checklist line as "no red markers left."
 3. ~~Verify the Aeron p50 claim.~~ **Done — it holds, and §6.2 now puts
    it better.** Measured p50 is 226 ns at 64 B and 335 ns at 256 B.
    Aeron's published ~250 ns is a *100 B* figure, so it falls between
@@ -88,14 +87,17 @@ submission whether to quote a range, add cross-run spread to
 5. **Byline and affiliations** in `main.tex` — camera-ready only, the
    submission stays anonymous. The `\else` branch still carries two
    placeholder names against a five-engineer team.
-6. **Fill the two manual numbers.** §6.3's MPSC saturation point reads
-   off Figure 3 — the producer count in
+6. **One manual number left.** §6.3's MPSC saturation point reads off
+   Figure 3 — the producer count in
    `artefact/paper1_throughput_mpsc.csv` where both arms stop scaling.
-   §6.2's O(n)-scan number has **no harness at all**: nothing in
-   `tests/bench/` measures a linear pool scan, so it is either a new
-   benchmark or a rewrite of the sentence to drop "on this hardware" and
-   make the contrast purely asymptotic. Recommend the rewrite — "on this
-   hardware" promises a measurement you would then have to defend.
+   Deliberately held until the sweep runs on final hardware, since the
+   number moves with the core count.
+   ~~§6.2's O(n)-scan number.~~ **Rewritten** — it cited a measurement
+   no harness produces (nothing in `tests/bench/` scans a pool
+   linearly), so §6.2 now gives the contrast asymptotically: up to 4096
+   constant-time compares at default pool capacity against exactly one,
+   pointing at §4.2 for the structure and Figure 2 for the consequence.
+   No number to defend.
 7. **§7 Discussion final pass** — now unblocked. Aeron lands at 1,447 ns
    against our gated 81 ns, roughly 18×, so §7.2's "we are faster
    because we do less" framing carries more weight than when it was

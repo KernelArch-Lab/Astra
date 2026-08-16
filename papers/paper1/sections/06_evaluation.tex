@@ -146,10 +146,16 @@ flat line is the $O(1)$ claim.}
 \label{fig:figure-2}
 \end{figure}
 
-For contrast, the $O(n)$ pool scan this design replaced grows
-linearly with pool size, reaching \todoNum{o(n) scan at 4096 ns}\,ns
-at a full pool on this hardware. The slot-indexed path costs the same
-\validateTail\,ns whether 16 tokens are live or 4090.
+For contrast, the $O(n)$ pool scan this design replaced performs one
+constant-time compare per live token---up to 4096 at the default pool
+capacity---where the slot-indexed path performs exactly one after a
+shift and a bounds check (\Cref{sec:design:fastpath}). We give that
+contrast asymptotically rather than measuring it: the scan is not code
+the artefact ships, and a structural difference a reader can verify
+from \Cref{sec:design:fastpath} is worth more than a latency no
+reviewer could reproduce. What we do measure is its consequence
+(\Cref{fig:figure-2})---the same \validateTail\,ns whether 16 tokens
+are live or 4090.
 
 \subsection{Q3: MPSC contention scaling}
 \label{sec:eval:mpsc}
