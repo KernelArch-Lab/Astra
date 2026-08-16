@@ -59,34 +59,42 @@ struct Rings
     struct io_uring receiver;
 };
 
-// Submission-queue polling keeps a kernel thread draining the SQ, so a
-// submit costs a store plus a memory barrier instead of an io_uring_enter
-// syscall. This is the configuration io_uring is meant to be judged in,
-// and the one docs/PUBLICATION_STRATEGY.md commits to; without it the
-// harness measures io_uring as a syscall wrapper and lands slower than a
-// plain pipe. SQPOLL needs CAP_SYS_NICE before Linux 5.11 and is
-// unprivileged after, so fall back cleanly and say which mode ran.
+// Submission-queue polling trades a syscall per submit for a dedicated
+// kernel thread draining the SQ — PER RING, and this harness opens two.
+// That is a good trade on a host with spare cores and a bad one without:
+// on a 4-core laptop with two cores handed to isolcpus, the pollers
+// contend with the benchmark threads for what little is left. Measured
+// there, SQPOLL made io_uring SLOWER (8.5 us vs 6.2 us p99 at 256 B) and
+// could stall outright on the idle/wakeup handshake.
+//
+// So it is opt-in, not default: set ASTRA_IOURING_SQPOLL=1 on a machine
+// with cores to spare. Whichever mode runs is reported, because the two
+// configurations are not comparable and the paper must say which it used.
 bool g_bSqpoll = false;
 
 void initRing(struct io_uring& r, unsigned int entries)
 {
-    struct io_uring_params params;
-    std::memset(&params, 0, sizeof(params));
-    params.flags = IORING_SETUP_SQPOLL;
-    params.sq_thread_idle = 2000;   // ms the poller idles before sleeping
-
-    int rc = io_uring_queue_init_params(entries, &r, &params);
-    if (rc == 0)
+    const char* pSqpoll = std::getenv("ASTRA_IOURING_SQPOLL");
+    if (pSqpoll != nullptr && pSqpoll[0] == '1')
     {
-        g_bSqpoll = true;
-        return;
+        struct io_uring_params params;
+        std::memset(&params, 0, sizeof(params));
+        params.flags = IORING_SETUP_SQPOLL;
+        params.sq_thread_idle = 100;   // ms before the poller sleeps
+
+        int rcPoll = io_uring_queue_init_params(entries, &r, &params);
+        if (rcPoll == 0)
+        {
+            g_bSqpoll = true;
+            return;
+        }
+        std::fprintf(stderr,
+                     "WARN: ASTRA_IOURING_SQPOLL=1 but SQPOLL init failed "
+                     "(%s) — using syscall-per-submit\n",
+                     std::strerror(-rcPoll));
     }
 
-    std::fprintf(stderr,
-                 "WARN: SQPOLL unavailable (%s) — falling back to "
-                 "syscall-per-submit mode; this understates io_uring\n",
-                 std::strerror(-rc));
-    rc = io_uring_queue_init(entries, &r, /*flags=*/0);
+    int rc = io_uring_queue_init(entries, &r, /*flags=*/0);
     if (rc < 0)
     {
         std::fprintf(stderr, "io_uring_queue_init: %s\n",

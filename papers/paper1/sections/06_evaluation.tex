@@ -258,3 +258,17 @@ line, is folded into the delta rather than isolated.
 well under 1\%, and the \texttt{rdtscp+lfence} serialisation cost is
 identical in every transport's measurement loop, so it cancels in
 comparisons.
+
+\para{io\_uring configuration} We report io\_uring in
+submit-per-operation mode rather than with submission-queue polling
+(\texttt{IORING\_SETUP\_SQPOLL}), and the reason is a property of our
+platform rather than a preference. SQPOLL trades the submit syscall
+for a kernel poller thread dedicated to each ring, and our
+request/response harness opens two; on a four-core machine with two
+cores removed by \texttt{isolcpus}, those pollers compete with the
+benchmark itself. Measured with SQPOLL enabled, io\_uring was
+\emph{slower} than without it. A reader should therefore not take our
+io\_uring column as io\_uring's floor---on a host with cores to spare
+SQPOLL is the right configuration, and the artefact enables it via
+\texttt{ASTRA\_IOURING\_SQPOLL=1}. The comparison we actually depend
+on is gate-on versus gate-off, which this does not touch.

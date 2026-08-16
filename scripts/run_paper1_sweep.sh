@@ -40,6 +40,9 @@ BUILD_DIR="build"
 OUT_FILE="artefact/paper1_figure_1.csv"
 PERF=""
 REPS=5
+# Per-repetition ceiling. Generous — a healthy rep is well under a minute
+# — but bounded, so a wedged benchmark fails loudly instead of hanging.
+BENCH_TIMEOUT="${BENCH_TIMEOUT:-300s}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -120,10 +123,19 @@ run_reps () {
     local k
     for k in $(seq 1 "$REPS"); do
         echo "  RUN  $name (rep $k/$REPS)"
-        $PERF "$bin" > "${outBase}.rep${k}.csv" 2>/dev/null || {
-            echo "  FAIL $name rep $k" >&2
+        # Hard timeout per repetition. A benchmark that wedges (SQPOLL's
+        # idle/wakeup handshake managed this on a core-starved host) must
+        # surface as a failure, not stall the sweep indefinitely.
+        if ! timeout --kill-after=10s "${BENCH_TIMEOUT}" \
+                 $PERF "$bin" > "${outBase}.rep${k}.csv" 2>/dev/null; then
+            local rc=$?
+            if [[ $rc -eq 124 || $rc -eq 137 ]]; then
+                echo "  TIMEOUT $name rep $k (>${BENCH_TIMEOUT}) — killed" >&2
+            else
+                echo "  FAIL $name rep $k (exit $rc)" >&2
+            fi
             return 1
-        }
+        fi
     done
     return 0
 }
