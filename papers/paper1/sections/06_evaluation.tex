@@ -111,11 +111,14 @@ is still a small number of nanoseconds, and the mediated path at
 check on our substrate, not as a scalp. Its purpose is to establish
 that the fastpath we are adding a gate to is a credible one rather
 than a strawman---if our ungated numbers were mediocre, a cheap gate
-would prove nothing. Aeron's p50 at 64\,B
-(\Cref{fig:figure-1}) sits within a few percent of its published
-figure, which tells us the harness is faithful; its p99 on this
-platform is dominated by scheduling jitter that a tuned server would
-not exhibit, so we do not lean on it. That \sysname measures faster
+would prove nothing. Aeron's published $\sim$250\,ns figure is taken at
+a 100\,B payload, and our measured p50 brackets it: we land below it at
+64\,B and above it at 256\,B (\Cref{fig:figure-1}), which is where a
+100\,B point belongs. Matching a published number we did not produce,
+on hardware that is not theirs, is what tells us the harness is
+faithful. Its p99 on this platform is a different story---dominated by
+scheduling jitter that a tuned server would not exhibit---so we do not
+lean on it. That \sysname measures faster
 still is unsurprising and not a claim we press: Aeron routes every
 message through a separate media-driver process and carries flow
 control, loss recovery, and a network transport that we simply do not

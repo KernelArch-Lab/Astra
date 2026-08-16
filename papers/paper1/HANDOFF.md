@@ -68,13 +68,21 @@ submission whether to quote a range, add cross-run spread to
    uses. `\todoNum{N}` in §6.3 and `\todoNum{o(n) scan at 4096 ns}` in
    §6.2 still render red. Do not read that checklist line as "no red
    markers left."
-3. **Verify the Aeron p50 claim.** §6.2 asserts Aeron's p50 at 64 B
-   "sits within a few percent of its published figure," which is the
-   load-bearing argument that our harness is faithful. Now that Aeron
-   measures, check it:
-   `grep -i aeron artefact/paper1_figure_1.csv | column -t -s,`.
-   If p50 at 64 B is not near the published ~250 ns, that sentence and
-   the substrate argument in §7.2 both need rework.
+3. ~~Verify the Aeron p50 claim.~~ **Done — it holds, and §6.2 now puts
+   it better.** Measured p50 is 226 ns at 64 B and 335 ns at 256 B.
+   Aeron's published ~250 ns is a *100 B* figure, so it falls between
+   them, which is where a 100 B point belongs. §6.2 now makes that
+   bracketing argument instead of the old "within a few percent," which
+   compared a 64 B measurement against a 100 B published number and was
+   9.6% off — understating our own validation. The new wording is
+   deliberately qualitative, with no hard-coded latencies, so a re-run
+   cannot silently falsify it in prose. **But the margin is not large**:
+   226 ns is only ~10% under 250. If a future sweep pushes Aeron's 64 B
+   p50 above 250 ns the bracketing breaks, so re-read that sentence
+   whenever Aeron is re-measured.
+   Aeron's far tail is brutal at every payload — p99.99 of 219 µs at
+   64 B against a 226 ns p50 is ~1000x, and max hits 65.8 ms at 16 KB.
+   That is exactly why §6.2 and §7.2 build nothing on its p99.
 4. **Decide how precisely to quote the gate cost** — see the spread
    note above the numbers table.
 5. **Byline and affiliations** in `main.tex` — camera-ready only, the
@@ -125,6 +133,18 @@ submission whether to quote a range, add cross-run spread to
 - **io_uring runs without SQPOLL by default.** SQPOLL dedicates a kernel
   poller per ring and measured *slower* here; it is opt-in via
   `ASTRA_IOURING_SQPOLL=1` and §6.8 explains the trade.
+- **There is no independent Aeron reference on the box.**
+  `compile-astra.sh` configures Aeron with `-DAERON_BUILD_SAMPLES=OFF`
+  (~line 519) and builds only `aeron_client` and `aeronmd`, so Aeron's
+  own Ping/Pong benchmark — the thing Real Logic runs to produce its
+  published figures — has never been run here. That was going to be the
+  cross-check for harness faithfulness; the payload-bracketing argument
+  in §6.2 now carries that weight instead, so building the samples is
+  optional rather than required. If you do want it: the rebuild guard
+  `aeronSig="pic=on;pin=$aeronPin"` (~line 504) tracks only PIC and
+  pinning, so flipping the samples flag will not invalidate the stamp
+  or trigger the from-scratch rebuild, and the script builds no sample
+  target. Both need changing, not just the flag.
 - **Aeron is a substrate sanity check, not a scalp.** We measure faster
   than it; §6.2 and §7.2 say plainly that this is because we do less
   (no media-driver decoupling, no network transport, no flow control).
