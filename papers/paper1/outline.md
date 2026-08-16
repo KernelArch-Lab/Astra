@@ -169,7 +169,9 @@ is a deterministic CBMC proof). No claim in the paper is unsupported.
 - Reproducibility: one-shell-command sweep + plot.
 
 ### §6 Evaluation
-- Hardware: Intel Xeon (Fedora; spec in artefact appendix).
+- Hardware: Intel Core i7-11370H, Tiger Lake, 4C/8T (Fedora 43; full
+  spec in artefact appendix). Mobile-class, not a server — §6.1 and the
+  threats subsection both say so explicitly.
 - §6.1 Latency head-to-head — Figure 1, Table 1 (already wired).
 - §6.2 Gate cost vs pool size — Figure 2 (Sprint 4 bench_validate).
 - §6.3 Revocation latency — TBD if reviewers ask; have the data.
@@ -204,17 +206,26 @@ is a deterministic CBMC proof). No claim in the paper is unsupported.
 
 ## 7. Open questions before writeup
 
-1. Do we ship a macrobench (NGINX / Redis) in Paper 1 or hold for
-   Paper 2?  Recommend: **hold** unless §6 page count overruns.
+1. ~~Do we ship a macrobench (NGINX / Redis) in Paper 1 or hold for
+   Paper 2?~~ **DECIDED: hold.** §6 fills the twelve pages on its own,
+   and §7.5 (`sections/07_discussion.tex`) states the reasoning —
+   space, plus a macrobench would shift the headline from "the gate is
+   cheap" to the weaker "the gate is cheap for this application."
+   Harness scaffolding still ships with the artefact; the numbers go in
+   the AE appendix.
 2. Single-author or full team on the byline?  Recommend: full
-   team — five engineers (KernelArch Labs) + advisor.
+   team — five engineers (KernelArch Labs) + advisor. **Still open**;
+   `main.tex` stays `\anontrue` for submission, and its `\else` branch
+   is still two placeholder names, so this needs real names before
+   camera-ready.
 3. Anonymous-submission identifier disclosure: code under
    `KernelArch-Lab/Astra` is already public. Need a strategy for
    anonymising the codebase URL during double-blind review (mirror to
    `anonymous/astra-paper1`).
-4. Do we land Sprint 8 (revocation-latency bench) before submission?
-   Recommend: **yes if 4 weeks free pre-deadline**, else cite
-   the design + give analytical bound.
+4. ~~Do we land Sprint 8 (revocation-latency bench) before
+   submission?~~ **DECIDED: landed.** `bench_revocation_latency` runs
+   in the sweep, §6.4 carries Figure 4 and a measured p99 of 0.4 µs.
+   No analytical bound needed.
 
 ---
 

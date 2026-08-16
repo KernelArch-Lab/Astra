@@ -145,7 +145,7 @@ placeholder figures are deliberately rendered in red so reviewers
 
 What remains in calendar terms before submission (updated 2026-07-15):
 
-1. **The measured sweep** on the tuned Fedora/Xeon host:
+1. **The measured sweep** on the tuned Fedora host (i7-11370H, Fedora 43):
    `./scripts/run_paper1_sweep.sh` (5 reps, ~70 min) then
    `papers/paper1/build.sh --refresh --check` — fills every red
    placeholder, regenerates all four data figures, and re-runs the
