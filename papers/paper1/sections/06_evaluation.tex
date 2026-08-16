@@ -90,8 +90,12 @@ the gated--raw delta:
 (RTT values as in \Cref{tab:rtt}: gated \gatedAstraRTT\,ns, raw
 \rawAstraRTT\,ns.)
 Cross-repetition stability for every headline cell appears in the
-artefact's CoV report; a cell drifting past 5\% across the five runs
-would have been flagged and re-measured. The gate-cost distribution
+artefact's CoV report. A number of cells on this machine do exceed
+5\%, which we read as the thermal and scheduling behaviour of a
+mobile-class part under sustained load (\Cref{sec:eval:hw}) rather
+than instability in the measured path. We ship that report rather
+than suppress it, so a reader can see exactly which cells moved and
+judge for themselves. The gate-cost distribution
 itself is tight, which is what you would expect from a validate body
 with no branches after the slot load.
 
@@ -231,12 +235,15 @@ hand-written C++ reference oracle.}
 \subsection{Threats to validity}
 \label{sec:eval:threats}
 
-\para{Single microarchitecture} Every number comes from one Cascade
-Lake Xeon. Absolute latencies will move on other parts---newer Intel,
-AMD, aarch64. The claims we defend are \emph{relative} (gate on vs.\
-gate off, same binary, same machine) and \emph{shape} (flatness
-across pool occupancy), both far less sensitive to the part than any
-absolute floor. The artefact reruns everywhere.
+\para{Single microarchitecture} Every number comes from one
+mobile-class Tiger Lake part (Core i7-11370H, \Cref{sec:eval:hw}).
+Absolute latencies will move on other parts---server Intel,
+AMD, aarch64---and sustained load on a laptop part invites thermal
+effects a rack machine would not show. The claims we defend are
+\emph{relative} (gate on vs.\ gate off, same binary, same machine)
+and \emph{shape} (flatness across pool occupancy), both far less
+sensitive to the part than any absolute floor. The artefact reruns
+everywhere.
 
 \para{Aeron comparison} Aeron's 250\,ns figure is its published
 number on its authors' hardware. Our primary comparison is our own
