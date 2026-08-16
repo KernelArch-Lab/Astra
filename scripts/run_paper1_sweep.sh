@@ -126,9 +126,13 @@ run_reps () {
         # Hard timeout per repetition. A benchmark that wedges (SQPOLL's
         # idle/wakeup handshake managed this on a core-starved host) must
         # surface as a failure, not stall the sweep indefinitely.
-        if ! timeout --kill-after=10s "${BENCH_TIMEOUT}" \
-                 $PERF "$bin" > "${outBase}.rep${k}.csv" 2>/dev/null; then
-            local rc=$?
+        # Capture the status via `|| rc=$?`, not `if ! cmd`. With `if !`,
+        # $? inside the branch is the NEGATION's result (0), so every
+        # failure reported a useless "exit 0".
+        local rc=0
+        timeout --kill-after=10s "${BENCH_TIMEOUT}" \
+            $PERF "$bin" > "${outBase}.rep${k}.csv" 2>/dev/null || rc=$?
+        if [[ $rc -ne 0 ]]; then
             if [[ $rc -eq 124 || $rc -eq 137 ]]; then
                 echo "  TIMEOUT $name rep $k (>${BENCH_TIMEOUT}) — killed" >&2
             else
