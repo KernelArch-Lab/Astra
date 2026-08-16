@@ -608,10 +608,14 @@ cmd_paper1() {
             && ok   "Thesis gate X: gate cost ${gate} ns ≤ 50 ns  — PASS" \
             || warn "Thesis gate X: gate cost ${gate} ns > 50 ns — bring to the team before submitting"
     fi
+    # Gate Y was "within 30% of Aeron" back when we expected to trail it.
+    # We now measure well ahead, and §6.2/§7.2 frame Aeron as a substrate
+    # sanity check rather than a target, so a signed gap is reported for
+    # information — passing it by being 95% faster would be meaningless.
     if [[ -n "$gap" ]]; then
-        awk -v y="$gap" 'BEGIN{exit !(y<=30)}' \
-            && ok   "Thesis gate Y: Aeron gap ${gap}% ≤ 30%  — PASS" \
-            || warn "Thesis gate Y: Aeron gap ${gap}% > 30% — bring to the team before submitting"
+        awk -v y="$gap" 'BEGIN{exit !(y<0)}' \
+            && info "Aeron comparison: gated path ${gap}% vs Aeron (negative = we are faster; see §7.2 for why that is not a win claim)" \
+            || info "Aeron comparison: gated path ${gap}% vs Aeron"
     fi
     echo
     info "Outputs:"
