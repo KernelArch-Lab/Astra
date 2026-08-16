@@ -224,7 +224,11 @@ if [[ $CHECK -eq 1 ]]; then
     PAGES=$(grep -oE 'Output written on .*\(([0-9]+) pages' main.log | grep -oE '[0-9]+ pages' | grep -oE '[0-9]+' || echo 0)
     echo "  INFO total pages (incl. refs): ${PAGES:-unknown}  (ATC limit: 12 excl. refs)"
 
-    STUBS=$(ls figures/*.STUB 2>/dev/null | wc -l | tr -d ' ')
+    # Count with a glob loop, not `ls | wc`: under `set -euo pipefail` a
+    # non-matching glob makes ls exit non-zero, which kills the script
+    # exactly when everything succeeded and no stubs remain.
+    STUBS=0
+    for _f in figures/*.STUB; do [[ -e "$_f" ]] && STUBS=$((STUBS + 1)); done
     if [[ "$STUBS" -eq 0 ]]; then echo "  OK   no stub figures — all figures are real"
     else echo "  TODO $STUBS figure(s) still stubs (need the Linux sweep)"; fi
 
