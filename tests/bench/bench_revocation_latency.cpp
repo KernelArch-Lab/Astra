@@ -91,6 +91,7 @@ uint64_t oneTrial(int poolActive, double tscPerNs)
     std::atomic<uint64_t> tDeniedTsc{0};
 
     std::thread producer([&]() {
+        astra_bench::pinSelf(0);
         std::vector<char> tx(kPayload, 'A');
         while (!stop.load(std::memory_order_acquire))
         {
@@ -106,6 +107,7 @@ uint64_t oneTrial(int poolActive, double tscPerNs)
     });
 
     std::thread consumer([&]() {
+        astra_bench::pinSelf(1);
         std::vector<char> buf(kPayload + 16, 0);
         while (!stop.load(std::memory_order_acquire))
             (void)ring.readGated(recvGate, buf.data(),
@@ -137,6 +139,8 @@ uint64_t oneTrial(int poolActive, double tscPerNs)
 
 int main()
 {
+    astra_bench::reportPinning("bench_revocation_latency");
+    astra_bench::pinSelf(0);
     const double tscPerNs = astra_bench::tscPerNs();
     std::printf("transport,pool_active,trial,window_ns\n");
 

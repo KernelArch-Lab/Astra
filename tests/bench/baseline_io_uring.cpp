@@ -153,6 +153,7 @@ void runPayload(std::size_t payload, std::size_t iters, double tscPerNs)
 
     std::atomic<bool> ready{false};
     std::thread echo([&]() {
+        astra_bench::pinSelf(1);
         std::vector<char> buf(payload, 0);
         ready.store(true, std::memory_order_release);
         for (std::size_t i = 0; i < iters + astra_bench::kWarmup; ++i)
@@ -229,6 +230,8 @@ void runPayload(std::size_t payload, std::size_t iters, double tscPerNs)
 
 int main()
 {
+    astra_bench::reportPinning("baseline_io_uring");
+    astra_bench::pinSelf(0);
     const double tscPerNs = astra_bench::tscPerNs();
     astra_bench::printCsvHeader();
     for (std::size_t p : astra_bench::kPayloads)

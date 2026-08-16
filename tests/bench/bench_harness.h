@@ -22,6 +22,8 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <thread>
 #include <vector>
 
@@ -29,8 +31,106 @@
 #include <x86intrin.h>
 #endif
 
+#if defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#endif
+
 namespace astra_bench
 {
+
+// ---------------------------------------------------------------------------
+// CPU pinning.
+//
+// isolcpus removes CPUs from the scheduler's general pool; it does NOT move
+// anything onto them. A benchmark that never sets affinity therefore gets
+// the OPPOSITE of what isolation is for: the isolated cores sit idle while
+// the benchmark crowds onto the remaining ones alongside the rest of the
+// system. Measured that way, isolcpus=2,3 on a four-core host made results
+// markedly worse (revocation p99 1.3 us -> 281 us) — which is exactly the
+// trap this helper exists to close.
+//
+// Cores are taken from ASTRA_BENCH_CPUS ("2,3") when set, otherwise from
+// /sys/devices/system/cpu/isolated, otherwise pinning is skipped. Index i
+// selects the i-th core in that list, wrapping if fewer are available.
+// ---------------------------------------------------------------------------
+inline std::vector<int> benchCpus()
+{
+    std::vector<int> cpus;
+#if defined(__linux__)
+    auto parse = [&cpus](const char* s) {
+        while (s != nullptr && *s != '\0')
+        {
+            char* end = nullptr;
+            long v = std::strtol(s, &end, 10);
+            if (end == s) break;
+            if (*end == '-')            // "2-3" range form
+            {
+                const char* rs = end + 1;
+                char* rend = nullptr;
+                long hi = std::strtol(rs, &rend, 10);
+                for (long c = v; c <= hi; ++c) cpus.push_back(static_cast<int>(c));
+                end = rend;
+            }
+            else
+            {
+                cpus.push_back(static_cast<int>(v));
+            }
+            while (*end == ',' || *end == ' ' || *end == '\n') ++end;
+            s = end;
+        }
+    };
+
+    if (const char* env = std::getenv("ASTRA_BENCH_CPUS"); env != nullptr)
+    {
+        parse(env);
+        return cpus;
+    }
+    if (std::FILE* f = std::fopen("/sys/devices/system/cpu/isolated", "r"))
+    {
+        char buf[256] = {0};
+        if (std::fgets(buf, sizeof(buf), f) != nullptr) parse(buf);
+        std::fclose(f);
+    }
+#endif
+    return cpus;
+}
+
+// Pin the calling thread to the i-th benchmark CPU. No-op when no isolated
+// or explicitly-listed CPUs exist, so unpinned hosts behave as before.
+inline bool pinSelf(std::size_t index)
+{
+#if defined(__linux__)
+    static const std::vector<int> cpus = benchCpus();
+    if (cpus.empty()) return false;
+    const int cpu = cpus[index % cpus.size()];
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(static_cast<std::size_t>(cpu), &set);
+    return ::pthread_setaffinity_np(::pthread_self(), sizeof(set), &set) == 0;
+#else
+    (void)index;
+    return false;
+#endif
+}
+
+// Announce the pinning decision once, on stderr, so the sweep log records
+// which cores produced the numbers.
+inline void reportPinning(const char* who)
+{
+    static bool done = false;
+    if (done) return;
+    done = true;
+    const std::vector<int> cpus = benchCpus();
+    if (cpus.empty())
+    {
+        std::fprintf(stderr, "%s: no isolated CPUs found — threads unpinned\n", who);
+        return;
+    }
+    std::fprintf(stderr, "%s: pinning to CPUs", who);
+    for (int c : cpus) std::fprintf(stderr, " %d", c);
+    std::fprintf(stderr, "\n");
+}
 
 // rdtscp + lfence on x86_64; steady_clock fallback elsewhere.
 inline uint64_t now()

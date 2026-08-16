@@ -137,6 +137,8 @@ void runPayload(std::size_t payload, std::size_t iters, double tscPerNs)
 
 int main()
 {
+    astra_bench::reportPinning("baseline_aeron");
+    astra_bench::pinSelf(0);
     const double tscPerNs = astra_bench::tscPerNs();
     astra_bench::printCsvHeader();
 
