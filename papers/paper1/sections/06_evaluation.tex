@@ -259,6 +259,18 @@ well under 1\%, and the \texttt{rdtscp+lfence} serialisation cost is
 identical in every transport's measurement loop, so it cancels in
 comparisons.
 
+\para{Aeron runs without core isolation} Every other harness pins its
+threads to the isolated cores; Aeron cannot. Its client adds a
+conductor thread to our measuring and echo threads, so three threads
+need CPU while two of them busy-spin, and two isolated cores with
+\texttt{nohz\_full}---whose whole purpose is to stop the timer tick
+there---leave no preemption to let the third run. The harness wedges.
+Aeron therefore runs across all CPUs, which gives it a noisier tail
+than the isolated measurements beside it. We flag this rather than
+bury it: it is a further reason to read Aeron's p99 on this platform
+as a property of the platform, and to lean only on the substrate
+argument of \Cref{sec:eval:rtt}.
+
 \para{io\_uring configuration} We report io\_uring in
 submit-per-operation mode rather than with submission-queue polling
 (\texttt{IORING\_SETUP\_SQPOLL}), and the reason is a property of our

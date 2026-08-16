@@ -82,7 +82,6 @@ void runPayload(std::size_t payload, std::size_t iters, double tscPerNs)
 
     std::atomic<bool> stop{false};
     std::thread echo([&]() {
-        astra_bench::pinSelfAll();
         // AtomicBuffer takes (uint8_t*, size_t) — no narrowing cast.
         aeron::concurrent::AtomicBuffer scratch(rx.data(), rx.size());
         aeron::FragmentAssembler asm_(
@@ -138,12 +137,18 @@ void runPayload(std::size_t payload, std::size_t iters, double tscPerNs)
 
 int main()
 {
-    astra_bench::reportPinning("baseline_aeron");
-    // The isolated SET, not one core. Aeron's client spawns a conductor
-    // thread of its own, so this harness needs three threads; pinning each
-    // to a single core puts all three busy-spinners on one (children inherit
-    // the creator's mask) and they starve one another indefinitely.
-    astra_bench::pinSelfAll();
+    // Aeron runs UNPINNED, unlike every other harness here, and the
+    // reason is structural rather than incidental. Its client adds a
+    // conductor thread to our measuring and echo threads, so three
+    // threads need CPU; two of them busy-spin. Confine those to the two
+    // isolated cores and nohz_full — which exists precisely to stop the
+    // timer tick on them — removes the preemption that would let the
+    // third make progress. The harness then wedges: observed as a 300 s
+    // timeout, twice. Letting the scheduler use every CPU costs Aeron
+    // some tail stability, which is acceptable because §6.2 uses Aeron
+    // to show our substrate is credible, not as a precision measurement.
+    std::fprintf(stderr, "baseline_aeron: running unpinned "
+                         "(needs >2 runnable threads; see §6.2)\n");
     const double tscPerNs = astra_bench::tscPerNs();
     astra_bench::printCsvHeader();
 
