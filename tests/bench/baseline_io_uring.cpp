@@ -59,9 +59,34 @@ struct Rings
     struct io_uring receiver;
 };
 
+// Submission-queue polling keeps a kernel thread draining the SQ, so a
+// submit costs a store plus a memory barrier instead of an io_uring_enter
+// syscall. This is the configuration io_uring is meant to be judged in,
+// and the one docs/PUBLICATION_STRATEGY.md commits to; without it the
+// harness measures io_uring as a syscall wrapper and lands slower than a
+// plain pipe. SQPOLL needs CAP_SYS_NICE before Linux 5.11 and is
+// unprivileged after, so fall back cleanly and say which mode ran.
+bool g_bSqpoll = false;
+
 void initRing(struct io_uring& r, unsigned int entries)
 {
-    int rc = io_uring_queue_init(entries, &r, /*flags=*/0);
+    struct io_uring_params params;
+    std::memset(&params, 0, sizeof(params));
+    params.flags = IORING_SETUP_SQPOLL;
+    params.sq_thread_idle = 2000;   // ms the poller idles before sleeping
+
+    int rc = io_uring_queue_init_params(entries, &r, &params);
+    if (rc == 0)
+    {
+        g_bSqpoll = true;
+        return;
+    }
+
+    std::fprintf(stderr,
+                 "WARN: SQPOLL unavailable (%s) — falling back to "
+                 "syscall-per-submit mode; this understates io_uring\n",
+                 std::strerror(-rc));
+    rc = io_uring_queue_init(entries, &r, /*flags=*/0);
     if (rc < 0)
     {
         std::fprintf(stderr, "io_uring_queue_init: %s\n",
@@ -202,6 +227,11 @@ int main()
     {
         runPayload(p, astra_bench::kIters, tscPerNs);
     }
+    // State the mode on stderr so the sweep log records which io_uring
+    // configuration produced these rows — the two are not comparable.
+    std::fprintf(stderr, "io_uring mode: %s\n",
+                 g_bSqpoll ? "SQPOLL (kernel-polled submission queue)"
+                           : "syscall-per-submit (SQPOLL unavailable)");
     return 0;
 }
 

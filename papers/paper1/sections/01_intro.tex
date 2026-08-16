@@ -86,8 +86,12 @@ together back every numerical claim we make
 
 \Cref{sec:eval} reports a per-message gate cost of
 \gateOverheadTail\,ns at p99 across payload sizes from 64\,B to
-16\,KiB, keeping the gated path within \aeronGapPercent\% of Aeron's
-RTT floor. The validate itself runs in \validateTail\,ns at p99
+16\,KiB. That is \gateOverheadPercent\% added to an ungated round
+trip of \rawAstraRTT\,ns---a large fraction of a very small
+number---and the mediated path that results, at
+\gatedAstraRTT\,ns, is still faster than every transport in our
+comparison set. Mediation, in other words, does not cost you the
+fastpath. The validate itself runs in \validateTail\,ns at p99
 \textit{regardless of pool occupancy} (\Cref{fig:figure-2}), which is
 the $O(1)$ claim made concrete.
 

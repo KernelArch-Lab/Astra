@@ -26,32 +26,46 @@ upper-half capability story, not the lower-half language-safety one.
 A Rust port of the hot path is on our roadmap, contingent on
 reviewers telling us the language is the paper's primary weakness.
 
-\subsection{The Aeron gap}
+\subsection{What the Aeron comparison does and does not show}
 \label{sec:disc:aeron}
 
-Aeron's published 250\,ns RTT is the tightest single-host IPC number
-in production use. Our gap of \aeronGapPercent\% is the figure we
-most want to defend downward, and the one reviewers will push
-upward. It decomposes into three parts:
+Aeron is the fastest production single-host IPC we know of, and it
+appears in our evaluation for one reason: to establish that the
+fastpath we bolt a capability gate onto is a real one. A cheap gate
+over a slow substrate would prove nothing.
+
+\sysname measures faster than Aeron here, and we want to be precise
+about why that is not the claim it might appear to be. Aeron's
+architecture buys properties we do not attempt:
 
 \begin{itemize}
 \itemsep0pt
-\item Two \texttt{validate()} calls per round trip
-($\sim$\gateOverheadTail\,ns each at p99). Irreducible without
-dropping security or weakening the constant-time comparator.
-\item C++23 range-checked containers and \texttt{Result<T>} unwraps
-on the hot path. Aeron's published number comes from a leaner,
-C-flavoured API; a no-stdlib rework of our hot path would claw some
-of this back, and we have not done it.
-\item Fence policy. Aeron's ring uses release-acquire on
-\texttt{write\_index} alone; our two-phase MPSC claim/commit needs it
-on \texttt{write\_claim\_index} as well. That is a correctness
-requirement, and it costs cycles relative to Aeron's SPSC-only
-arrangement.
+\item \textbf{A media-driver process.} Every Aeron message passes
+through a separate driver that owns the log buffers, so publishers
+and subscribers are decoupled and can come and go independently.
+\sysname maps its ring directly into both endpoints; we gain a hop,
+and lose that decoupling.
+\item \textbf{One API across transports.} The same Aeron publication
+works over IPC, UDP unicast, and multicast, with flow control, loss
+detection, and retransmission underneath. \sysname's ring is
+single-host shared memory and nothing else.
+\item \textbf{Operational maturity.} Aeron ships counters, loss
+reporting, archival replay, and a decade of production hardening.
+We ship a research prototype.
 \end{itemize}
 
-We do not expect to beat Aeron at raw RTT---the design template is
-shared---but the gap should narrow with a hot-path API streamline.
+Read honestly, then: we are faster because we do less, on a workload
+that rewards doing less. What the number legitimately supports is the
+narrow point the paper needs---our ungated path is competitive, so
+the \gateOverheadTail\,ns we measure for the gate is measured against
+a credible baseline rather than a strawman.
+
+One methodological note. Aeron's p50 on our platform lands close to
+its published figure, which gives us confidence the harness is
+faithful; its p99 is inflated by scheduling jitter that a dedicated
+server would not show. We therefore treat Aeron's tail on this
+machine as a property of the machine, not of Aeron, and we do not
+build any argument on it.
 
 \subsection{Reading HongMeng}
 \label{sec:disc:hongmeng}

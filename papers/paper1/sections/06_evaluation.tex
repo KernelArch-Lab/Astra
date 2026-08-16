@@ -18,15 +18,25 @@ Five questions drive the evaluation:
 \subsection{Hardware and methodology}
 \label{sec:eval:hw}
 
-All measurements were taken on a single-socket Intel Xeon Gold 6248
-(2.50\,GHz, Cascade Lake) with 192\,GB of DDR4-2933, running Fedora
-39 with kernel 6.7. Hyper-threading is disabled in the BIOS, the
-\texttt{performance} cpufreq governor is active, cores 4--7 are
-isolated (\texttt{isolcpus=4-7 nohz\_full=4-7}), and producer and
-consumer threads are pinned to dedicated cores. The toolchain is
-C++23 on gcc 13.2.1 at \texttt{-O3 -march=native}. Time comes from
+All measurements were taken on an Intel Core i7-11370H (3.30\,GHz,
+Tiger Lake, 4 cores / 8 threads) running Fedora 43 with kernel 7.0.10.
+The \texttt{performance} cpufreq governor is active; SMT is disabled
+and cores 2--3 are isolated
+(\texttt{isolcpus=2,3 nohz\_full=2,3 rcu\_nocbs=2,3}), with producer
+and consumer threads pinned to the isolated pair. The toolchain is
+C++23 on gcc 15.2.1 at \texttt{-O3 -march=native}. Time comes from
 \texttt{rdtscp + lfence}, calibrated against \texttt{steady\_clock}
 over a 50\,ms window.
+
+We note the platform explicitly because it shapes what these numbers
+can support. This is a mobile-class part, not a server: absolute
+latencies would differ on server silicon, and sustained load invites
+thermal effects that a rack part would not see. The claims we defend
+are therefore \emph{relative}---gate-on versus gate-off in the same
+binary on the same machine---and \emph{shape}, such as flatness of
+\texttt{validate} across pool occupancy. Both are far less sensitive
+to the platform than any absolute floor, and the artefact reruns
+everywhere.
 
 \textbf{Warm-up} is 4096 untimed round trips per measurement.
 \textbf{Iteration count} is 200,000 per data point.
@@ -49,10 +59,10 @@ numbers at the canonical 256\,B payload.
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/paper1_figure_1}
-\caption{Round-trip p99 latency vs payload size. \sysname (gate ON,
-solid orange; gate OFF, solid green) holds within \aeronGapPercent\%
-of Aeron (red dashed) across the payload range; both clear pipe(2)
-and socketpair by an order of magnitude.}
+\caption{Round-trip p99 latency vs payload size, log-log. \sysname
+gate ON (solid orange) and gate OFF (solid green) track each other
+at a near-constant offset---the gate cost---across the payload
+range, and both sit below every other transport measured.}
 \label{fig:figure-1}
 \end{figure}
 
@@ -81,11 +91,29 @@ would have been flagged and re-measured. The gate-cost distribution
 itself is tight, which is what you would expect from a validate body
 with no branches after the slot load.
 
-\textbf{Aeron gap.} The gated p99 lands within \aeronGapPercent\% of
-Aeron's. Most of the residual is the slot load inside
-\texttt{validate()}, not the ring claim/commit---that part of the
-design is shared with the Aeron template to begin with (see
-\Cref{sec:disc:aeron}).
+\textbf{Relative cost.} The gate adds \gateOverheadPercent\% to the
+round trip. We quote that fraction ourselves because it is the
+number a sceptical reader will compute, and because the honest
+reading of it is favourable: a large percentage of \rawAstraRTT\,ns
+is still a small number of nanoseconds, and the mediated path at
+\gatedAstraRTT\,ns remains faster than every transport in
+\Cref{tab:rtt}.
+
+\textbf{On the Aeron comparison.} Aeron is in the table as a sanity
+check on our substrate, not as a scalp. Its purpose is to establish
+that the fastpath we are adding a gate to is a credible one rather
+than a strawman---if our ungated numbers were mediocre, a cheap gate
+would prove nothing. Aeron's p50 at 64\,B
+(\Cref{fig:figure-1}) sits within a few percent of its published
+figure, which tells us the harness is faithful; its p99 on this
+platform is dominated by scheduling jitter that a tuned server would
+not exhibit, so we do not lean on it. That \sysname measures faster
+still is unsurprising and not a claim we press: Aeron routes every
+message through a separate media-driver process and carries flow
+control, loss recovery, and a network transport that we simply do not
+implement. The comparison establishes that our fastpath is fast. It
+does not establish that \sysname is a better system than Aeron, and
+we make no such argument (\Cref{sec:disc:aeron}).
 
 \subsection{Q2: $O(1)$ validate across pool occupancy}
 \label{sec:eval:o1}

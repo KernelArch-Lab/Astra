@@ -89,6 +89,11 @@ def main() -> int:
     # consumer). Keep in sync with the equation in sections/06_evaluation.
     delta_p99 = max(0.0, (gatA - rawA) / 2.0)
     aeron_gap = (gatA - aer) / aer * 100 if aer > 0 else 0
+    # What the gate adds to the round trip, relative to the ungated path.
+    # We quote this ourselves rather than let a reviewer compute it: a
+    # large percentage of a very small number is still a small number,
+    # and that is precisely the argument.
+    gate_pct = (gatA - rawA) / rawA * 100 if rawA > 0 else 0
 
     pool_at_full = pickPool(pool, 4090)
     val_p50   = float(pool_at_full.get("p50_ns",   0))
@@ -122,6 +127,7 @@ def main() -> int:
     # Deltas may legitimately be zero or negative (a negative Aeron gap
     # means we beat Aeron) — presence keys on the inputs, not the value.
     emit("gateOverheadTail", delta_p99, present=(rawA > 0 and gatA > 0))
+    emit("gateOverheadPercent", gate_pct, ".0f", present=(rawA > 0 and gatA > 0))
     emit("aeronGapPercent",  aeron_gap, ".1f", present=(aer > 0 and gatA > 0))
     emit("revokeTail",       rev_p99_us, ".1f")
     return 0

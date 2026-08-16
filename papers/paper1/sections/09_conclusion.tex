@@ -5,12 +5,11 @@
 through an unforgeable 128-bit capability token, and does it cheaply
 enough to matter. The slot-indexed validate path costs
 \gateOverheadTail\,ns per message at p99 while keeping a $2^{96}$
-forgery space; the gated round trip stays within \aeronGapPercent\%
-of Aeron's published 250\,ns floor from 64\,B to 16\,KiB payloads;
-revocation takes effect within \revokeTail\,$\mu$s of the
-\texttt{revoke()} call; and the gate scales through 16-producer MPSC
-contention. None of that required a kernel patch, a hypervisor, or
-capability hardware.
+forgery space; the mediated round trip, at \gatedAstraRTT\,ns, stays
+faster than every transport we measured against; revocation takes
+effect within \revokeTail\,$\mu$s of the \texttt{revoke()} call; and
+the gate scales through MPSC contention. None of that required a
+kernel patch, a hypervisor, or capability hardware.
 
 We see this as one piece of a larger argument: that capability
 discipline can become the default for userspace runtimes that broker

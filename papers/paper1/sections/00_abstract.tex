@@ -17,10 +17,11 @@ moves.
 The check is affordable because of a \emph{slot-indexed validate
 path}, which collapses what would naturally be an $O(n)$ pool scan
 into a single shift, one cache load, and one constant-time compare,
-while keeping a $2^{96}$ forgery space. We measure a per-message gate
-cost of \gateOverheadTail\,ns at p99 across payloads from 64\,B to
-16\,KiB, which holds \sysname's gated round trip within
-\aeronGapPercent\% of Aeron's published 250\,ns floor while providing
+while keeping a $2^{96}$ forgery space. The gate costs
+\gateOverheadTail\,ns per message at p99---\gateOverheadPercent\% of
+an ungated round trip that is itself only \rawAstraRTT\,ns---and the
+resulting mediated path still beats every transport we measured
+against, Aeron included. On top of that it provides
 Cornucopia\,Reloaded-class cascading revocation in software, with
 $O(1)$ time-to-effect regardless of pool occupancy. Revocation lands
 within \revokeTail\,$\mu$s of the \texttt{revoke()} call, end to end
