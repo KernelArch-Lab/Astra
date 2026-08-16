@@ -90,10 +90,16 @@ if [[ $PLOTS -eq 1 ]]; then
         > numbers/table_perf.tex
 fi
 
-# Build the gate_path TikZ standalone if not already a PDF.
+# Build the gate_path TikZ standalone if not already a PDF. Needs the
+# `standalone` document class (Fedora: texlive-standalone). A failure here
+# must NOT sink the whole paper build — fall back to a stub below.
 if [[ ! -f figures/gate_path.pdf || figures/gate_path.tex -nt figures/gate_path.pdf ]]; then
     echo "==> Building gate_path.pdf (TikZ standalone)"
-    compile_standalone figures/gate_path.tex
+    if ! compile_standalone figures/gate_path.tex; then
+        echo "==> WARNING: gate_path.tex failed to build (missing 'standalone'"
+        echo "    class? Fedora: sudo dnf install texlive-standalone texlive-pgf)"
+        echo "    Falling back to a placeholder box for this figure."
+    fi
 fi
 
 # Apply mode override.
@@ -118,6 +124,7 @@ mkdir -p numbers figures
 # labelled red "[Figure placeholder]" box. NO-OP when real PDFs exist.
 # ---------------------------------------------------------------------------
 REQUIRED_FIGS=(
+    figures/gate_path.pdf
     figures/paper1_figure_1.pdf
     figures/paper1_figure_2.pdf
     figures/paper1_figure_3_mpsc.pdf

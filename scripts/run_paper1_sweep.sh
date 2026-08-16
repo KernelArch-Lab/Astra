@@ -144,11 +144,20 @@ done
 # aeronmd through the CnC file under /dev/shm. Start one for the duration of
 # the Aeron reps and take it down afterwards. AERON_DIR is exported by
 # compile-astra.sh's paper1 pipeline; a manual sweep can export it too.
+# CAREFUL: AERON_DIR is Aeron's OWN environment variable — both the media
+# driver and the client read it to locate their shared-memory directory
+# (default /dev/shm/aeron-$USER). If a caller exported it pointing at the
+# Aeron *source tree* (as our build once did), the driver writes its CnC
+# file there and nothing lines up. Use ASTRA_AERON_HOME for the build
+# location and clear AERON_DIR so Aeron uses its own default.
+ASTRA_AERON_HOME="${ASTRA_AERON_HOME:-${ROOT}/third_party/aeron}"
+unset AERON_DIR
+
 AERONMD_PID=""
 start_aeronmd () {
     local md=""
-    for cand in "${AERON_DIR:-}/cppbuild/Release/binaries/aeronmd" \
-                "${AERON_DIR:-}/cppbuild/Release/aeronmd" \
+    for cand in "$ASTRA_AERON_HOME/cppbuild/Release/binaries/aeronmd" \
+                "$ASTRA_AERON_HOME/cppbuild/Release/aeronmd" \
                 "$(command -v aeronmd 2>/dev/null || true)"; do
         [[ -n "$cand" && -x "$cand" ]] && { md="$cand"; break; }
     done
@@ -159,14 +168,20 @@ start_aeronmd () {
     echo "  START aeronmd ($md)"
     "$md" >"$ART_DIR/_aeronmd.log" 2>&1 &
     AERONMD_PID=$!
-    # Wait (max 10s) for the driver to publish its CnC file.
+    # Wait (max 30s) for the driver to publish its CnC file. Aeron's
+    # default directory is /dev/shm/aeron-$USER.
     local waited=0
-    while [[ $waited -lt 100 ]]; do
-        compgen -G "/dev/shm/aeron-*/cnc.dat" >/dev/null 2>&1 && return 0
-        kill -0 "$AERONMD_PID" 2>/dev/null || { echo "  FAIL aeronmd died — see $ART_DIR/_aeronmd.log" >&2; AERONMD_PID=""; return 1; }
+    while [[ $waited -lt 300 ]]; do
+        compgen -G "/dev/shm/aeron-*/cnc.dat" >/dev/null 2>&1 && {
+            echo "  OK    CnC file up after $((waited / 10))s"; return 0; }
+        kill -0 "$AERONMD_PID" 2>/dev/null || {
+            echo "  FAIL aeronmd died. Last lines of its log:" >&2
+            tail -5 "$ART_DIR/_aeronmd.log" >&2 || true
+            AERONMD_PID=""; return 1; }
         sleep 0.1; waited=$((waited + 1))
     done
-    echo "  WARN aeronmd started but no CnC file after 10s" >&2
+    echo "  WARN aeronmd alive but no CnC file after 30s. Log tail:" >&2
+    tail -5 "$ART_DIR/_aeronmd.log" >&2 || true
     return 0
 }
 stop_aeronmd () {

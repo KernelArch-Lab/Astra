@@ -123,6 +123,7 @@ cmd_deps() {
         libuuid-devel \
         python3-matplotlib python3-pandas python3-numpy \
         texlive-scheme-medium texlive-collection-latexrecommended \
+        texlive-standalone texlive-pgf \
         git
     ok "Prerequisites installed."
 }
@@ -531,7 +532,11 @@ cmd_paper1() {
         if [[ -n "$aeronDir" ]] && \
            compgen -G "$aeronDir/lib/libaeron_client*" >/dev/null 2>&1; then
             aeronFlag=( "-DAERON_DIR=$aeronDir" )
-            export AERON_DIR="$aeronDir"      # the sweep starts aeronmd from this
+            # NOT AERON_DIR: that is Aeron's own env var for its shared-memory
+            # directory (/dev/shm/aeron-$USER). Exporting it here would send
+            # the media driver's CnC file into the source tree and the
+            # baseline would never connect.
+            export ASTRA_AERON_HOME="$aeronDir"
             ok "Aeron client present: $(ls "$aeronDir"/lib/libaeron_client* | head -1)"
             if ! compgen -G "$aeronDir/cppbuild/Release/binaries/aeronmd" >/dev/null 2>&1 \
                && ! [[ -x "$aeronDir/cppbuild/Release/aeronmd" ]]; then
