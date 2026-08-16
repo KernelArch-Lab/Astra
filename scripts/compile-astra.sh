@@ -491,30 +491,39 @@ cmd_paper1() {
         fi
         if [[ -n "$aeronDir" && ! -e "$aeronDir/lib/libaeron_client.so" ]]; then
             info "Building Aeron C++ client (minimal profile, one-time, ~5 min)"
-            if cmake -S "$aeronDir" -B "$aeronDir/cppbuild/Release" \
-                     -DCMAKE_BUILD_TYPE=Release \
-                     -DAERON_TESTS=OFF -DAERON_SYSTEM_TESTS=OFF \
-                     -DAERON_UNIT_TESTS=OFF -DAERON_BUILD_SAMPLES=OFF \
-                     -DBUILD_AERON_ARCHIVE_API=OFF -DAERON_BUILD_DOCUMENTATION=OFF \
-               && { cmake --build "$aeronDir/cppbuild/Release" \
-                          --target aeron_client aeronmd -j"$JOBS" \
-                    || cmake --build "$aeronDir/cppbuild/Release" -j"$JOBS"; }
-            then
-                ln -sfn "cppbuild/Release/lib" "$aeronDir/lib"
-                # Some Aeron versions name the shared lib *_shared.so —
-                # provide the name tests/bench links against.
-                if [[ ! -e "$aeronDir/lib/libaeron_client.so" \
-                      && -e "$aeronDir/lib/libaeron_client_shared.so" ]]; then
-                    ln -sf libaeron_client_shared.so "$aeronDir/lib/libaeron_client.so"
-                fi
-                ok "Aeron client built."
-            else
-                warn "Aeron build FAILED — bench_baseline_aeron will emit SKIPPED"
-                warn "and \\aeronGapPercent (the headline number) will stay a red placeholder."
-            fi
+            # aeron_client → libaeron_client.a; aeronmd → the media driver
+            # binary the client connects to. BOTH are needed: without the
+            # driver, Aeron::connect() times out and the baseline skips.
+            cmake -S "$aeronDir" -B "$aeronDir/cppbuild/Release" \
+                  -DCMAKE_BUILD_TYPE=Release \
+                  -DAERON_TESTS=OFF -DAERON_SYSTEM_TESTS=OFF \
+                  -DAERON_UNIT_TESTS=OFF -DAERON_BUILD_SAMPLES=OFF \
+                  -DBUILD_AERON_ARCHIVE_API=OFF -DAERON_BUILD_DOCUMENTATION=OFF \
+                || warn "Aeron configure failed"
+            cmake --build "$aeronDir/cppbuild/Release" \
+                  --target aeron_client -j"$JOBS" \
+                || warn "Aeron client build failed"
+            cmake --build "$aeronDir/cppbuild/Release" \
+                  --target aeronmd -j"$JOBS" \
+                || warn "aeronmd (media driver) build failed — Aeron will skip at run time"
+            ln -sfn "cppbuild/Release/lib" "$aeronDir/lib" 2>/dev/null || true
         fi
-        [[ -n "$aeronDir" && -e "$aeronDir/lib/libaeron_client.so" ]] \
-            && aeronFlag=( "-DAERON_DIR=$aeronDir" )
+        # Guard on the client library under either name; CMake's
+        # find_library in tests/bench accepts both.
+        if [[ -n "$aeronDir" ]] && \
+           compgen -G "$aeronDir/lib/libaeron_client*" >/dev/null 2>&1; then
+            aeronFlag=( "-DAERON_DIR=$aeronDir" )
+            export AERON_DIR="$aeronDir"      # the sweep starts aeronmd from this
+            ok "Aeron client present: $(ls "$aeronDir"/lib/libaeron_client* | head -1)"
+            if ! compgen -G "$aeronDir/cppbuild/Release/binaries/aeronmd" >/dev/null 2>&1 \
+               && ! [[ -x "$aeronDir/cppbuild/Release/aeronmd" ]]; then
+                warn "aeronmd not built — Aeron baseline will SKIP and"
+                warn "\\aeronGapPercent (the headline number) stays a red placeholder."
+            fi
+        else
+            warn "No Aeron client library — bench_baseline_aeron will emit SKIPPED"
+            warn "and \\aeronGapPercent (the headline number) will stay a red placeholder."
+        fi
     else
         warn "--skip-aeron: \\aeronGapPercent will stay a red placeholder."
     fi

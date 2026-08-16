@@ -90,22 +90,45 @@ else()
     message(STATUS "  [Paper-1] liburing not found — bench_baseline_io_uring will self-skip")
 endif()
 
-# --- Aeron: optional -I via -DAERON_DIR=/path/to/aeron-cpp/build ------------
+# --- Aeron: optional -I via -DAERON_DIR=/path/to/aeron ----------------------
+# The C++ client ships as BOTH a static libaeron_client.a (target
+# `aeron_client`) and a shared libaeron_client_shared.so (target
+# `aeron_client_shared`), and which one exists depends on what was built.
+# Search for either rather than hard-coding one name — a missed lookup
+# here silently drops the paper's primary baseline.
 if(AERON_DIR)
-    target_include_directories(bench_baseline_aeron PRIVATE
-        ${AERON_DIR}/aeron-client/src/main/cpp
-        ${AERON_DIR}/aeron-driver/src/main/c
-        ${AERON_DIR})
-    target_link_libraries(bench_baseline_aeron PRIVATE
-        ${AERON_DIR}/lib/libaeron_client.so)
-    message(STATUS "  [Paper-1] Aeron at ${AERON_DIR}")
+    find_library(AERON_CLIENT_LIB
+        NAMES aeron_client aeron_client_shared
+        PATHS ${AERON_DIR}/lib
+              ${AERON_DIR}/cppbuild/Release/lib
+              ${AERON_DIR}/cppbuild/Debug/lib
+        NO_DEFAULT_PATH)
+    if(AERON_CLIENT_LIB)
+        # SYSTEM: Aeron's headers use old-style casts and signed/unsigned
+        # conversions that Astra's -Werror -Wold-style-cast -Wsign-conversion
+        # would (correctly, for our code) reject. Third-party headers are not
+        # ours to lint.
+        target_include_directories(bench_baseline_aeron SYSTEM PRIVATE
+            ${AERON_DIR}/aeron-client/src/main/cpp
+            ${AERON_DIR}/aeron-driver/src/main/c
+            ${AERON_DIR})
+        target_link_libraries(bench_baseline_aeron PRIVATE
+            ${AERON_CLIENT_LIB} pthread dl)
+        message(STATUS "  [Paper-1] Aeron client: ${AERON_CLIENT_LIB}")
+    else()
+        message(WARNING "  [Paper-1] AERON_DIR=${AERON_DIR} set but no "
+                        "libaeron_client[_shared] under lib/ — the paper's "
+                        "PRIMARY baseline will self-skip. Build it with: "
+                        "cmake --build <dir> --target aeron_client")
+    endif()
 else()
     message(STATUS "  [Paper-1] AERON_DIR not set — bench_baseline_aeron will self-skip")
 endif()
 
 # --- eRPC: optional -I via -DERPC_DIR=/path/to/eRPC -------------------------
 if(ERPC_DIR)
-    target_include_directories(bench_baseline_erpc PRIVATE
+    # SYSTEM for the same reason as Aeron above — not our headers to lint.
+    target_include_directories(bench_baseline_erpc SYSTEM PRIVATE
         ${ERPC_DIR}/src
         ${ERPC_DIR})
     target_link_libraries(bench_baseline_erpc PRIVATE

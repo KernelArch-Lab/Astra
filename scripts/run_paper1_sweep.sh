@@ -139,13 +139,52 @@ for b in "${REQ[@]}"; do
     for k in $(seq 1 "$REPS"); do REQ_CSVS+=("$ART_DIR/_${b}.rep${k}.csv"); done
 done
 
+# --- Aeron media driver ------------------------------------------------------
+# Aeron's C++ client is useless without a running media driver: it talks to
+# aeronmd through the CnC file under /dev/shm. Start one for the duration of
+# the Aeron reps and take it down afterwards. AERON_DIR is exported by
+# compile-astra.sh's paper1 pipeline; a manual sweep can export it too.
+AERONMD_PID=""
+start_aeronmd () {
+    local md=""
+    for cand in "${AERON_DIR:-}/cppbuild/Release/binaries/aeronmd" \
+                "${AERON_DIR:-}/cppbuild/Release/aeronmd" \
+                "$(command -v aeronmd 2>/dev/null || true)"; do
+        [[ -n "$cand" && -x "$cand" ]] && { md="$cand"; break; }
+    done
+    if [[ -z "$md" ]]; then
+        echo "  NOTE aeronmd not found — Aeron baseline will emit SKIPPED" >&2
+        return 1
+    fi
+    echo "  START aeronmd ($md)"
+    "$md" >"$ART_DIR/_aeronmd.log" 2>&1 &
+    AERONMD_PID=$!
+    # Wait (max 10s) for the driver to publish its CnC file.
+    local waited=0
+    while [[ $waited -lt 100 ]]; do
+        compgen -G "/dev/shm/aeron-*/cnc.dat" >/dev/null 2>&1 && return 0
+        kill -0 "$AERONMD_PID" 2>/dev/null || { echo "  FAIL aeronmd died — see $ART_DIR/_aeronmd.log" >&2; AERONMD_PID=""; return 1; }
+        sleep 0.1; waited=$((waited + 1))
+    done
+    echo "  WARN aeronmd started but no CnC file after 10s" >&2
+    return 0
+}
+stop_aeronmd () {
+    [[ -n "$AERONMD_PID" ]] || return 0
+    echo "  STOP  aeronmd"
+    kill "$AERONMD_PID" 2>/dev/null || true
+    wait "$AERONMD_PID" 2>/dev/null || true
+    AERONMD_PID=""
+}
+trap stop_aeronmd EXIT
+
 # Optional — present if dep installed; otherwise skipped.
-OPT=(bench_baseline_aeron
-     bench_baseline_erpc)
-for b in "${OPT[@]}"; do
+start_aeronmd || true
+for b in bench_baseline_aeron bench_baseline_erpc; do
     if run_reps "$b" "$ART_DIR/_${b}"; then
         for k in $(seq 1 "$REPS"); do REQ_CSVS+=("$ART_DIR/_${b}.rep${k}.csv"); done
     fi
+    [[ "$b" == "bench_baseline_aeron" ]] && stop_aeronmd
 done
 
 # Median-merge every transport's reps into the canonical figure-1 CSV.

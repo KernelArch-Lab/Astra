@@ -36,11 +36,13 @@ int main()
 #else // AeronCpp present
 
 #include <Aeron.h>
+#include <FragmentAssembler.h>   // not pulled in by Aeron.h
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <thread>
 #include <vector>
 
@@ -80,10 +82,11 @@ void runPayload(std::size_t payload, std::size_t iters, double tscPerNs)
 
     std::atomic<bool> stop{false};
     std::thread echo([&]() {
-        aeron::concurrent::AtomicBuffer scratch(rx.data(),
-                                                static_cast<std::int32_t>(rx.size()));
+        // AtomicBuffer takes (uint8_t*, size_t) — no narrowing cast.
+        aeron::concurrent::AtomicBuffer scratch(rx.data(), rx.size());
         aeron::FragmentAssembler asm_(
-            [&](aeron::AtomicBuffer& buf, std::int32_t off, std::int32_t len,
+            [&](aeron::concurrent::AtomicBuffer& buf,
+                aeron::util::index_t off, aeron::util::index_t len,
                 aeron::Header& /*hdr*/) {
                 std::memcpy(scratch.buffer(), buf.buffer() + off,
                             static_cast<std::size_t>(len));
@@ -96,16 +99,18 @@ void runPayload(std::size_t payload, std::size_t iters, double tscPerNs)
             subReq->poll(asm_.handler(), 16);
     });
 
-    aeron::concurrent::AtomicBuffer txBuf(tx.data(),
-                                          static_cast<std::int32_t>(tx.size()));
+    aeron::concurrent::AtomicBuffer txBuf(tx.data(), tx.size());
     bool gotReply = false;
     aeron::FragmentAssembler asmReply(
-        [&](aeron::AtomicBuffer& /*buf*/, std::int32_t /*off*/,
-            std::int32_t /*len*/, aeron::Header& /*hdr*/) { gotReply = true; });
+        [&](aeron::concurrent::AtomicBuffer& /*buf*/,
+            aeron::util::index_t /*off*/, aeron::util::index_t /*len*/,
+            aeron::Header& /*hdr*/) { gotReply = true; });
 
     auto roundTrip = [&]() {
         gotReply = false;
-        while (pubReq->offer(txBuf, 0, static_cast<std::int32_t>(tx.size())) < 0L) {}
+        while (pubReq->offer(
+                   txBuf, 0,
+                   static_cast<aeron::util::index_t>(tx.size())) < 0L) {}
         while (!gotReply) subReply->poll(asmReply.handler(), 1);
     };
 
@@ -134,9 +139,27 @@ int main()
 {
     const double tscPerNs = astra_bench::tscPerNs();
     astra_bench::printCsvHeader();
-    for (std::size_t p : astra_bench::kPayloads)
+
+    // Aeron's C++ client talks to a media driver (aeronmd) over the CnC
+    // file in /dev/shm. With no driver running, connect() throws
+    // DriverTimeoutException — degrade to a SKIPPED row rather than
+    // aborting and taking the whole sweep down with us.
+    try
     {
-        runPayload(p, astra_bench::kIters, tscPerNs);
+        for (std::size_t p : astra_bench::kPayloads)
+        {
+            runPayload(p, astra_bench::kIters, tscPerNs);
+        }
+    }
+    catch (const std::exception& ex)
+    {
+        std::printf("aeron,SKIPPED,0,0,0,0,0,0\n");
+        std::fprintf(stderr,
+                     "WARN: Aeron baseline skipped: %s\n"
+                     "      Is the media driver running? Start it with:\n"
+                     "        $AERON_DIR/cppbuild/Release/binaries/aeronmd &\n",
+                     ex.what());
+        return 0;
     }
     return 0;
 }
