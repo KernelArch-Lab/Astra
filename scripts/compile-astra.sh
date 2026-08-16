@@ -460,11 +460,16 @@ cmd_paper1() {
     # -- 3. Aeron: the primary baseline. Auto-provision unless told not to --
     # We configure Aeron ourselves with a minimal C++-client-only profile
     # instead of cppbuild/cppbuild: the full build drags in a JDK (system
-    # tests) and archive tooling that the bench does not need. The bench
-    # links ${AERON_DIR}/lib/libaeron_client.so and includes the client
-    # sources, so a lib symlink to the cmake output dir completes the
-    # expected layout. Guard on the LIB, not the headers — a clone whose
-    # build failed must retry the build, not skip it.
+    # tests) and archive tooling the bench does not need.
+    #
+    # POSITION_INDEPENDENT_CODE is mandatory, not cosmetic: Fedora links
+    # executables as PIE and Astra adds -fPIE hardening, so a non-PIC
+    # libaeron_client.a fails with "relocation R_X86_64_32S ... can not be
+    # used when making a PIE object".
+    #
+    # The configure step always re-runs (it is seconds, and idempotent) so
+    # that flag changes like the above propagate into an existing clone;
+    # the build steps are no-ops when already current.
     local aeronFlag=()
     if (( useAeron )); then
         # Pinned release: reproducible for AE, and 1.44.x is known to ship
@@ -473,9 +478,10 @@ cmd_paper1() {
         local aeronPin="${AERON_PIN:-1.44.0}"
         local aeronDir="${AERON_DIR:-$REPO_ROOT/third_party/aeron}"
 
-        # A clone at the wrong ref with no built lib (e.g. a failed earlier
-        # attempt at master) is useless — replace it with the pinned tag.
-        if [[ -d "$aeronDir" && ! -e "$aeronDir/lib/libaeron_client.so" ]]; then
+        # A clone at the wrong ref with nothing built is useless — replace
+        # it with the pinned tag.
+        if [[ -d "$aeronDir" ]] && \
+           ! compgen -G "$aeronDir/lib/libaeron_client*" >/dev/null 2>&1; then
             local aeronRef
             aeronRef="$(git -C "$aeronDir" describe --tags --exact-match 2>/dev/null || echo none)"
             if [[ "$aeronRef" != "$aeronPin" ]]; then
@@ -489,13 +495,24 @@ cmd_paper1() {
                 https://github.com/real-logic/aeron.git "$aeronDir" \
                 || { warn "Aeron clone failed"; aeronDir=""; }
         fi
-        if [[ -n "$aeronDir" && ! -e "$aeronDir/lib/libaeron_client.so" ]]; then
-            info "Building Aeron C++ client (minimal profile, one-time, ~5 min)"
+        if [[ -n "$aeronDir" ]]; then
+            # Objects built before PIC was required are unusable but look
+            # perfectly valid on disk. Stamp the build dir with the flag
+            # signature and wipe it whenever that signature changes.
+            local aeronSig="pic=on;pin=$aeronPin"
+            local aeronStamp="$aeronDir/cppbuild/Release/.astra-flags"
+            if [[ -d "$aeronDir/cppbuild/Release" ]] && \
+               [[ "$(cat "$aeronStamp" 2>/dev/null || echo none)" != "$aeronSig" ]]; then
+                warn "Aeron build dir predates the current flags — rebuilding from scratch"
+                rm -rf "$aeronDir/cppbuild/Release"
+            fi
+            info "Configuring + building Aeron C++ client (first run ~5 min)"
             # aeron_client → libaeron_client.a; aeronmd → the media driver
             # binary the client connects to. BOTH are needed: without the
             # driver, Aeron::connect() times out and the baseline skips.
             cmake -S "$aeronDir" -B "$aeronDir/cppbuild/Release" \
                   -DCMAKE_BUILD_TYPE=Release \
+                  -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
                   -DAERON_TESTS=OFF -DAERON_SYSTEM_TESTS=OFF \
                   -DAERON_UNIT_TESTS=OFF -DAERON_BUILD_SAMPLES=OFF \
                   -DBUILD_AERON_ARCHIVE_API=OFF -DAERON_BUILD_DOCUMENTATION=OFF \
@@ -507,6 +524,7 @@ cmd_paper1() {
                   --target aeronmd -j"$JOBS" \
                 || warn "aeronmd (media driver) build failed — Aeron will skip at run time"
             ln -sfn "cppbuild/Release/lib" "$aeronDir/lib" 2>/dev/null || true
+            printf '%s' "$aeronSig" > "$aeronStamp" 2>/dev/null || true
         fi
         # Guard on the client library under either name; CMake's
         # find_library in tests/bench accepts both.
