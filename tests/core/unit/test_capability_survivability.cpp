@@ -108,10 +108,29 @@ int main()
             {
                 int r = std::uniform_int_distribution<int>(0, kRoots-1)(rng);
                 int c = std::uniform_int_distribution<int>(0, kPerRoot-1)(rng);
+
+                // Timestamp BEFORE the call, not after (fix 2026-08-16).
+                // Taking it afterwards made the check unsound: a producer
+                // preempted between a legitimate true-returning validate()
+                // and Clock::now() records a time past tRoot and reports a
+                // violation that never happened. Observed on an isolated-core
+                // configuration as deltas of 3 us and 868 us — scheduler
+                // timeslices, not memory ordering, which on x86 resolves in
+                // tens of nanoseconds.
+                //
+                // Recording the pre-call instant makes the test sound in one
+                // direction: a flagged sample is one whose validate() is
+                // PROVEN to have begun after revoke() returned, so seeing
+                // true really would violate the release/acquire contract. A
+                // producer preempted before its validate() simply records an
+                // earlier instant and is not counted — costing sensitivity,
+                // never correctness. With four producers hammering for
+                // seconds, sensitivity is not the scarce resource.
+                const TP tStart = Clock::now();
                 if (mgr.validate(tree[static_cast<std::size_t>(r)]
                                      [static_cast<std::size_t>(c)],
                                  Permission::IPC_SEND))
-                    store(lastTrue[idxFor(r,c)], Clock::now());
+                    store(lastTrue[idxFor(r,c)], tStart);
             }
         });
     }
