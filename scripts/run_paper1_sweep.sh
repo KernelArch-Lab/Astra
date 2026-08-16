@@ -90,9 +90,12 @@ fi
 SMT="$(cat /sys/devices/system/cpu/smt/control 2>/dev/null || echo unknown)"
 if [[ "$SMT" == "on" ]]; then
     echo "WARNING: SMT is enabled — paper numbers are taken with SMT off." >&2
+    echo "         sudo grubby --update-kernel=ALL --args=\"nosmt\" && reboot" >&2
 fi
 if ! grep -q isolcpus /proc/cmdline 2>/dev/null; then
     echo "WARNING: no isolcpus= on the kernel cmdline — expect noisier tails." >&2
+    echo "         sudo grubby --update-kernel=ALL \\" >&2
+    echo "           --args=\"nosmt isolcpus=2,3 nohz_full=2,3 rcu_nocbs=2,3\"" >&2
 fi
 
 # --- 1. Build all baselines -------------------------------------------------

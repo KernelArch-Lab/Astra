@@ -20,10 +20,14 @@ Five questions drive the evaluation:
 
 All measurements were taken on an Intel Core i7-11370H (3.30\,GHz,
 Tiger Lake, 4 cores / 8 threads) running Fedora 43 with kernel 7.0.10.
-The \texttt{performance} cpufreq governor is active; SMT is disabled
-and cores 2--3 are isolated
-(\texttt{isolcpus=2,3 nohz\_full=2,3 rcu\_nocbs=2,3}), with producer
-and consumer threads pinned to the isolated pair. The toolchain is
+The \texttt{performance} cpufreq governor is active, and the kernel
+command line carries
+\texttt{nosmt isolcpus=2,3 nohz\_full=2,3 rcu\_nocbs=2,3}---SMT off,
+two physical cores reserved---with producer and consumer threads
+pinned to the isolated pair. We disable SMT by kernel parameter
+rather than in firmware so that the configuration is fully captured
+by \texttt{/proc/cmdline}, and therefore reproducible by anyone
+running the artefact. The toolchain is
 C++23 on gcc 15.2.1 at \texttt{-O3 -march=native}. Time comes from
 \texttt{rdtscp + lfence}, calibrated against \texttt{steady\_clock}
 over a 50\,ms window.
