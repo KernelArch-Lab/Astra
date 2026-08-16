@@ -48,6 +48,31 @@ else
 fi
 echo "==> LaTeX engine: $ENGINE"
 
+# --- LaTeX package preflight -------------------------------------------------
+# texlive-scheme-medium does not carry everything main.tex needs. Report
+# EVERY missing package at once with the exact install command, instead of
+# failing on one .sty per build.
+if command -v kpsewhich >/dev/null 2>&1; then
+    declare -a MISSING_STY=()
+    # sty:fedora-package
+    for pair in cleveref:texlive-cleveref standalone:texlive-standalone \
+                pgfplots:texlive-pgfplots tikz:texlive-pgf \
+                microtype:texlive-microtype booktabs:texlive-booktabs \
+                multirow:texlive-multirow breakurl:texlive-breakurl \
+                xcolor:texlive-xcolor listings:texlive-listings \
+                hyperref:texlive-hyperref amsmath:texlive-amsmath \
+                xspace:texlive-tools graphicx:texlive-graphics; do
+        sty="${pair%%:*}"; pkg="${pair##*:}"
+        kpsewhich "${sty}.sty" >/dev/null 2>&1 || MISSING_STY+=("$pkg")
+    done
+    if [[ ${#MISSING_STY[@]} -gt 0 ]]; then
+        echo "==> ERROR: missing LaTeX packages: ${MISSING_STY[*]}" >&2
+        echo "    Fedora:  sudo dnf install -y $(printf '%s ' "${MISSING_STY[@]}")" >&2
+        echo "    Debian:  sudo apt install texlive-latex-extra texlive-pictures texlive-science" >&2
+        exit 5
+    fi
+fi
+
 compile_standalone () {
     # $1 = .tex file (compiled in its own directory)
     local tex="$1"

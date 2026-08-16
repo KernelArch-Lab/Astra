@@ -123,7 +123,8 @@ cmd_deps() {
         libuuid-devel \
         python3-matplotlib python3-pandas python3-numpy \
         texlive-scheme-medium texlive-collection-latexrecommended \
-        texlive-standalone texlive-pgf \
+        texlive-standalone texlive-pgf texlive-cleveref texlive-pgfplots \
+        texlive-microtype texlive-booktabs texlive-multirow texlive-breakurl \
         git
     ok "Prerequisites installed."
 }
