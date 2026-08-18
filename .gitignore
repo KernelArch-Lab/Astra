@@ -148,3 +148,6 @@ papers/paper1/submission/_stage/
 # Paper-1 one-command pipeline (compile-astra.sh paper1)
 build-paper1/
 third_party/aeron/
+
+# Personal documents — offer letters for named individuals. Never track these.
+Offer Letter/
