@@ -1,7 +1,13 @@
 # Paper 1 — session handoff
 
-State as of 2026-08-16. Read this first when picking the work back up;
-it is written to be self-contained.
+State as of 2026-08-18, HEAD `6fe0317`. Read this first when picking
+the work back up; it is written to be self-contained.
+
+The editorial pass is done: Aeron measured, §6.2's CoV claim and Aeron
+validation corrected, the O(n)-scan number removed, the io_uring
+harness disclosed, §6.8's hardware fixed, and Table 3 captioned. What
+remains is one measured number, two judgement calls, and the hardware
+decision described below.
 
 ## Where the paper stands
 
