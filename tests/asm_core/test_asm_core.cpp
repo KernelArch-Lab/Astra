@@ -14,8 +14,10 @@
 
 #include <astra/asm_core/asm_core.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -104,10 +106,19 @@ void test_ct_compare_null_returns_minus_one()
     EXPECT_EQ(asm_ct_compare(lArrA, nullptr, 8), -1, "null right → -1");
 }
 
-// Microbench: timing should not depend on which byte differs.
-// We compare the median CPU time of "differs at byte 0" vs "differs at byte 1023"
-// across many iterations. A constant-time implementation should produce
-// values within a small relative margin.
+// Microbench: timing must not depend on WHICH byte differs.
+//
+// Take the MINIMUM of several alternating trials, not one sample of each.
+// Timing noise is one-sided: an interrupt, a migration or a frequency change
+// can only ever ADD time, never remove it. So the minimum converges on the
+// true cost and is dramatically more stable than a single reading, while
+// staying just as sensitive to a real early-exit leak.
+//
+// The earlier version claimed to use a median but took exactly one sample of
+// each variant, then asserted their ratio stayed under 1.5. On a machine
+// still busy from the build that flakes, and a flake here blocks the whole
+// paper pipeline because ctest gates the sweep. Alternating the two variants
+// also cancels slow drift across the measurement.
 void test_ct_compare_timing_independence()
 {
     std::printf("\n[asm_ct_compare timing]\n");
@@ -136,15 +147,23 @@ void test_ct_compare_timing_independence()
     (void)fnTimed(lVB.data());
     (void)fnTimed(lVC.data());
 
-    long long lINsFirst = fnTimed(lVB.data());
-    long long lINsLast  = fnTimed(lVC.data());
+    constexpr int iTrials = 9;
+    long long lINsFirst = std::numeric_limits<long long>::max();
+    long long lINsLast  = std::numeric_limits<long long>::max();
+    for (int t = 0; t < iTrials; ++t)
+    {
+        lINsFirst = std::min(lINsFirst, fnTimed(lVB.data()));
+        lINsLast  = std::min(lINsLast,  fnTimed(lVC.data()));
+    }
 
     double lFRatio = (lINsFirst > lINsLast)
                        ? static_cast<double>(lINsFirst) / static_cast<double>(lINsLast)
                        : static_cast<double>(lINsLast) / static_cast<double>(lINsFirst);
 
-    std::printf("  first-byte-diff:  %lld ns / %d iter\n", lINsFirst, iIter);
-    std::printf("  last-byte-diff:   %lld ns / %d iter\n", lINsLast,  iIter);
+    std::printf("  first-byte-diff:  %lld ns / %d iter (best of %d)\n",
+                lINsFirst, iIter, iTrials);
+    std::printf("  last-byte-diff:   %lld ns / %d iter (best of %d)\n",
+                lINsLast,  iIter, iTrials);
     std::printf("  ratio:            %.3f (constant-time expects ≈ 1.0)\n", lFRatio);
 
     // Tolerance is generous because CI machines have noisy clocks.
