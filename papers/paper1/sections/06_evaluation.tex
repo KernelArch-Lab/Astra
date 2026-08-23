@@ -42,7 +42,12 @@ binary on the same machine---and \emph{shape}, such as flatness of
 to the platform than any absolute floor, and the artefact reruns
 everywhere.
 
-\textbf{Warm-up} is 4096 untimed round trips per measurement.
+\textbf{Warm-up} is 1,000,000 untimed round trips per measurement.
+The count is large deliberately. Warm-up is a shared iteration count
+rather than a duration, so it buys the \emph{fastest} transport the
+\emph{least} settling time; at a smaller count our lowest-latency
+paths measured before the frequency ramp had settled, which showed up
+as a systematic drift across repetitions on exactly those rows.
 \textbf{Iteration count} is 200,000 per data point.
 \textbf{Percentiles} come from sort-and-index over the full sample,
 with no HDR-bucket approximation; the artefact ships every

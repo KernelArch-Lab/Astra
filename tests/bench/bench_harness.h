@@ -242,7 +242,21 @@ inline void printCsvRow(const char* transport, std::size_t payload,
 // Default payload sweep used by every baseline (Paper 1 Figure 1).
 inline constexpr std::size_t kPayloads[] = {64, 256, 1024, 4096, 16384};
 inline constexpr std::size_t kIters      = 200'000;
-inline constexpr std::size_t kWarmup     = 4096;
+// Warm-up is a COUNT shared by the measuring and echo sides (the pipe,
+// socketpair and io_uring harnesses run their echo loop for
+// iters + kWarmup, so both must agree). That makes warm-up *time* inversely
+// proportional to transport speed, and at 4096 the consequence was severe:
+// astra_raw at ~66 ns got 270 us of settling while io_uring at ~6.6 us got
+// 27 ms. The 2026-08-16 sweep drifted -8.2% and -5.6% across repetitions on
+// exactly those two fastest transports, and by under 3% on the rest — a
+// clean inverse correlation with warm-up time, on the two transports the
+// headline gate cost is derived from.
+//
+// 1e6 gives the fastest path tens of milliseconds, long enough for the
+// frequency ramp and uncore to settle. It costs the slow transports a few
+// extra seconds per point, roughly 8 minutes across a 5-repetition sweep,
+// which is a good trade for a headline number that reproduces.
+inline constexpr std::size_t kWarmup     = 1'000'000;
 
 } // namespace astra_bench
 
