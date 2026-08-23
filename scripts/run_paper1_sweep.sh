@@ -63,6 +63,28 @@ cd "$ROOT"
 
 ART_DIR="$(dirname "$OUT_FILE")"
 mkdir -p "$ART_DIR"
+
+# Environment guard. Lives HERE rather than in compile-astra.sh because both
+# entry points (compile-astra.sh paper1 and a direct sweep) come through this
+# script, and a guard that only one path runs is a guard that does not exist.
+# Aborts on a host that would produce unpublishable numbers — chiefly
+# benchmark cores split across NUMA nodes, which routes the IPC ring over the
+# socket interconnect and inflates every latency with no visible error.
+# ASTRA_ALLOW_BAD_ENV=1 overrides.
+if [[ -x "$ROOT/scripts/paper1_env_guard.py" ]]; then
+    if ! python3 "$ROOT/scripts/paper1_env_guard.py" \
+            --json "$ART_DIR/environment_guard.json"; then
+        if [[ "${ASTRA_ALLOW_BAD_ENV:-0}" == "1" ]]; then
+            echo "WARNING: environment guard failed but ASTRA_ALLOW_BAD_ENV=1 — continuing." >&2
+        else
+            echo "ERROR: environment guard refused this host. Fix the failures above," >&2
+            echo "       or set ASTRA_ALLOW_BAD_ENV=1 to run anyway." >&2
+            exit 3
+        fi
+    fi
+    echo
+fi
+mkdir -p "$ART_DIR"
 MERGE="python3 scripts/paper1_merge_reps.py"
 COV_REPORT="$ART_DIR/paper1_cov_report.txt"
 : > "$COV_REPORT"
@@ -304,3 +326,14 @@ echo "    Per-repetition raw CSVs kept as $ART_DIR/_<bench>.repK.csv"
 echo "    Figure 1 plot:    python3 scripts/plot_paper1_figure.py $OUT_FILE"
 echo "    Figure 2 plot:    python3 scripts/plot_paper1_figure_2.py $ART_DIR/paper1_pool_scaling.csv"
 echo "    Quick read:       column -t -s, $OUT_FILE | sort -k1,1 -k2,2n"
+
+# --- 6. Run quality report --------------------------------------------------
+# The summary above says what was measured. This says whether to trust it,
+# and writes run_summary.json for paper1_compare_runs.py to diff against a
+# later run. Never fails the sweep: the data is already on disk and worth
+# keeping even if the report itself has a problem.
+if [[ -x "$ROOT/scripts/paper1_run_report.py" ]]; then
+    echo
+    python3 "$ROOT/scripts/paper1_run_report.py" \
+        --artefact "$ART_DIR" --json "$ART_DIR/run_summary.json" || true
+fi
