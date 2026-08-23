@@ -101,17 +101,26 @@ def repDrift(artefact: Path) -> list[dict]:
                 series.append((k, statistics.median(vals)))
         if len(series) < 3:
             continue
-        first, last = series[0][1], series[-1][1]
-        drift = (last - first) / first * 100 if first else 0.0
-        # Spearman-style monotonicity: how many steps go the same way as
-        # the overall trend. A clean thermal ramp scores near 1.0.
-        steps = [series[i + 1][1] - series[i][1] for i in range(len(series) - 1)]
-        same = sum(1 for s in steps if (s > 0) == (drift > 0))
+        vals = [v for _, v in series]
+        med = statistics.median(vals)
+        # Trend, robustly. Comparing the FIRST reading to the LAST makes a
+        # single outlier at either end look like a trend: astra measured
+        # [61.8, 61.8, 62.4, 61.8, 68.4] on 2026-08-23, which is four
+        # identical repetitions and one bad fifth, but first-vs-last called
+        # it +10.7% drift. Comparing the median of each half is immune to
+        # one bad reading in five.
+        half = len(vals) // 2
+        firstHalf = statistics.median(vals[:half]) if half else vals[0]
+        lastHalf = statistics.median(vals[-half:]) if half else vals[-1]
+        trend = (lastHalf - firstHalf) / med * 100 if med else 0.0
+        # Spread is noise, not trend. Reported separately so the two are not
+        # confused: a run can be noisy without drifting, and vice versa.
+        spread = (max(vals) - min(vals)) / med * 100 if med else 0.0
         findings.append({
             "bench": bench,
-            "drift_pct": round(drift, 2),
-            "monotonic_frac": round(same / len(steps), 2) if steps else 0.0,
-            "series": [round(v, 1) for _, v in series],
+            "trend_pct": round(trend, 2),
+            "spread_pct": round(spread, 2),
+            "series": [round(v, 1) for v in vals],
         })
     return findings
 
@@ -157,7 +166,7 @@ def main() -> int:
     ap.add_argument("--artefact", type=Path, default=Path("artefact"))
     ap.add_argument("--json", type=Path, default=None)
     ap.add_argument("--drift-warn", type=float, default=3.0,
-                    help="percent p99 drift between first and last rep")
+                    help="percent robust trend between first and second half of reps")
     ap.add_argument("--tail-warn", type=float, default=100.0,
                     help="p99.99/p50 ratio above which a tail is scheduler noise")
     ap.add_argument("--flat-warn", type=float, default=10.0,
@@ -259,13 +268,14 @@ def main() -> int:
     if not drift:
         line("info", "no per-repetition CSVs found (need 3+ reps to judge)")
     for d in drift:
-        bad = abs(d["drift_pct"]) > args.drift_warn and d["monotonic_frac"] >= 0.6
+        bad = abs(d["trend_pct"]) > args.drift_warn
         tag = "WARN" if bad else "ok"
-        line(tag, f"{d['bench']}: {d['drift_pct']:+.1f}% first->last, "
-                  f"monotonic {d['monotonic_frac']:.0%}, series {d['series']}")
+        line(tag, f"{d['bench']}: trend {d['trend_pct']:+.1f}%, "
+                  f"spread {d['spread_pct']:.1f}%, series {d['series']}")
         if bad:
-            problems.append(f"{d['bench']} drifts {d['drift_pct']:+.1f}% across reps, "
-                            "monotonically: thermal or frequency instability")
+            problems.append(f"{d['bench']} trends {d['trend_pct']:+.1f}% between the "
+                            "first and second half of its repetitions: thermal or "
+                            "frequency instability")
 
     # -- tail health -----------------------------------------------------
     print("\n[3] Tail health (p99.99 / p50 at 256 B)")
@@ -376,16 +386,49 @@ def main() -> int:
     print("\n[8] Cross-repetition stability")
     cov = A / "paper1_cov_report.txt"
     if cov.exists():
-        text = cov.read_text()
-        over = text.count("WARN")
-        total = over + text.count("ok  ")
+        # Break the count down BY COLUMN. One threshold across every column
+        # conflates metrics with completely different natures: max_ns is a
+        # single sample per repetition and has no stability to offer, while
+        # p50 is a median over 200,000 and should be rock solid. A blanket
+        # count tells you nothing about whether the numbers the paper quotes
+        # are stable.
+        byCol: dict[str, list[int]] = {}
+        over = total = 0
+        for ln in cov.read_text().splitlines():
+            m = re.match(r"^(ok|WARN)\s+\S+\s+(\S+):\s+median=\S+\s+cov=([\d.]+)%", ln)
+            if not m:
+                continue
+            tag_, col, _ = m.groups()
+            b = byCol.setdefault(col, [0, 0])
+            b[1] += 1
+            total += 1
+            if tag_ == "WARN":
+                b[0] += 1
+                over += 1
         summary["checks"]["cov_over"] = over
         summary["checks"]["cov_total"] = total
-        tag = "ok" if over == 0 else "WARN"
-        line(tag, f"{over} of {total} cells exceed the 5% threshold")
-        if over:
-            problems.append(f"{over} cells over 5% CoV; 6.2 must describe this "
-                            "rather than claim cells were re-measured")
+        summary["checks"]["cov_by_column"] = {k: {"over": v[0], "total": v[1]}
+                                              for k, v in sorted(byCol.items())}
+        line("WARN" if over else "ok", f"{over} of {total} cells exceed 5%")
+        QUOTED = ("p50_ns", "p99_ns")   # the columns the paper actually prints
+        quotedOver = sum(byCol.get(c, [0, 0])[0] for c in QUOTED)
+        quotedTot = sum(byCol.get(c, [0, 0])[1] for c in QUOTED)
+        for col, (o, t) in sorted(byCol.items(), key=lambda kv: -kv[1][0]):
+            mark = "  <- quoted in the paper" if col in QUOTED else ""
+            line("WARN" if o else "ok", f"  {col:<12} {o:>3} / {t:<3} over{mark}")
+        summary["checks"]["cov_quoted_over"] = quotedOver
+        summary["checks"]["cov_quoted_total"] = quotedTot
+        if quotedTot:
+            line("WARN" if quotedOver else "ok",
+                 f"columns the paper quotes: {quotedOver} of {quotedTot} over 5%")
+            if quotedOver:
+                problems.append(f"{quotedOver} of {quotedTot} cells over 5% CoV in "
+                                f"p50/p99, the columns the paper actually quotes; "
+                                f"6.2 must describe this")
+            else:
+                notes.append("CoV overshoot is confined to tail columns "
+                             "(max/p99.99), which are near-single samples; every "
+                             "p50 and p99 cell is within 5%")
     else:
         line("info", "no CoV report found")
 

@@ -30,6 +30,7 @@ SCALARS = [
     (("headline", "gate_ns"),        "gate cost (ns)",          True),
     (("headline", "gate_pct"),       "gate as % of RTT",        True),
     (("checks",   "cov_over"),       "cells over 5% CoV",       True),
+    (("checks",   "cov_quoted_over"), "over 5% in p50/p99",     True),
     (("gates",    "o1_flatness_pct"),"validate spread (%)",     True),
 ]
 
@@ -99,18 +100,30 @@ def main() -> int:
             print(f"  {tag:<7} no per-repetition data")
 
     # Thermal drift, per benchmark, matched by name.
-    print("\nThermal drift (first to last repetition)")
+    # Trend and spread separately. Conflating them is how a single outlier
+    # repetition gets reported as drift.
+    print("\nRepetition trend (robust: median of first half vs second half)")
     bd = {d["bench"]: d for d in (dig(b, ("checks", "rep_drift")) or [])}
     ad = {d["bench"]: d for d in (dig(a, ("checks", "rep_drift")) or [])}
     for name in sorted(set(bd) | set(ad)):
-        bv = bd.get(name, {}).get("drift_pct")
-        av = ad.get(name, {}).get("drift_pct")
+        bv = bd.get(name, {}).get("trend_pct", bd.get(name, {}).get("drift_pct"))
+        av = ad.get(name, {}).get("trend_pct", ad.get(name, {}).get("drift_pct"))
         if bv is None or av is None:
             print(f"  {name:<32} {'only in one run':>28}")
             continue
         verdict = "BETTER" if abs(av) < abs(bv) - 0.5 else \
                   "WORSE" if abs(av) > abs(bv) + 0.5 else "unchanged"
         print(f"  {name:<32} {bv:+7.1f}% -> {av:+7.1f}%   {verdict}")
+
+    print("\nRepetition spread (max to min, as % of median)")
+    for name in sorted(set(bd) | set(ad)):
+        bv = bd.get(name, {}).get("spread_pct")
+        av = ad.get(name, {}).get("spread_pct")
+        if bv is None or av is None:
+            print(f"  {name:<32} {'not recorded in one run':>28}")
+            continue
+        verdict = "BETTER" if av < bv - 0.5 else "WORSE" if av > bv + 0.5 else "unchanged"
+        print(f"  {name:<32} {bv:>7.1f}% -> {av:>7.1f}%   {verdict}")
 
     # Tail ratios per transport.
     print("\nTail ratio p99.99/p50")
