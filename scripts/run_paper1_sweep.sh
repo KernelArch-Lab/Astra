@@ -110,7 +110,44 @@ fi
 cmake --build "$BUILD_DIR" --target paper1_baselines -j
 
 # --- 2. Repetition runner ----------------------------------------------------
+# run_one <binary> <out-file> <k> <total>: one repetition.
+# Split out of run_reps so the required baselines can be interleaved
+# repetition-major (see section 3) while aeron/erpc stay blocked.
+run_one () {
+    local name="$1"
+    local outFile="$2"
+    local k="$3"
+    local total="$4"
+    local bin="$BUILD_DIR/tests/bench/$name"
+    if [[ ! -x "$bin" ]]; then
+        echo "  SKIP $name (binary missing)"
+        return 2
+    fi
+    echo "  RUN  $name (rep $k/$total)"
+    # Hard timeout per repetition. A benchmark that wedges (SQPOLL's
+    # idle/wakeup handshake managed this on a core-starved host) must
+    # surface as a failure, not stall the sweep indefinitely.
+    # Capture the status via `|| rc=$?`, not `if ! cmd`. With `if !`,
+    # $? inside the branch is the NEGATION's result (0), so every
+    # failure reported a useless "exit 0".
+    local rc=0
+    timeout --kill-after=10s "${BENCH_TIMEOUT}" \
+        $PERF "$bin" > "$outFile" 2>/dev/null || rc=$?
+    if [[ $rc -ne 0 ]]; then
+        if [[ $rc -eq 124 || $rc -eq 137 ]]; then
+            echo "  TIMEOUT $name rep $k (>${BENCH_TIMEOUT}) — killed" >&2
+        else
+            echo "  FAIL $name rep $k (exit $rc)" >&2
+        fi
+        return 1
+    fi
+    return 0
+}
+
 # run_reps <binary> <out-base>: runs REPS times into <out-base>.repK.csv.
+# Benchmark-major. Still used where a repetition cannot be interleaved with
+# anything else — aeron needs its media driver held up across its own reps,
+# and the Sprint 8 metrics are not differenced against each other.
 # Returns 1 if any required rep fails.
 run_reps () {
     local name="$1"
@@ -122,24 +159,7 @@ run_reps () {
     fi
     local k
     for k in $(seq 1 "$REPS"); do
-        echo "  RUN  $name (rep $k/$REPS)"
-        # Hard timeout per repetition. A benchmark that wedges (SQPOLL's
-        # idle/wakeup handshake managed this on a core-starved host) must
-        # surface as a failure, not stall the sweep indefinitely.
-        # Capture the status via `|| rc=$?`, not `if ! cmd`. With `if !`,
-        # $? inside the branch is the NEGATION's result (0), so every
-        # failure reported a useless "exit 0".
-        local rc=0
-        timeout --kill-after=10s "${BENCH_TIMEOUT}" \
-            $PERF "$bin" > "${outBase}.rep${k}.csv" 2>/dev/null || rc=$?
-        if [[ $rc -ne 0 ]]; then
-            if [[ $rc -eq 124 || $rc -eq 137 ]]; then
-                echo "  TIMEOUT $name rep $k (>${BENCH_TIMEOUT}) — killed" >&2
-            else
-                echo "  FAIL $name rep $k (exit $rc)" >&2
-            fi
-            return 1
-        fi
+        run_one "$name" "${outBase}.rep${k}.csv" "$k" "$REPS" || return $?
     done
     return 0
 }
@@ -154,8 +174,27 @@ REQ=(bench_baseline_pipe
 
 REQ_CSVS=()
 for b in "${REQ[@]}"; do
-    run_reps "$b" "$ART_DIR/_${b}"
     for k in $(seq 1 "$REPS"); do REQ_CSVS+=("$ART_DIR/_${b}.rep${k}.csv"); done
+done
+
+# INTERLEAVED, repetition-major. This matters for correctness, not tidiness.
+#
+# Benchmark-major ordering ran all five astra repetitions to completion
+# before the first astra_gated repetition started, so raw and gated were
+# measured in two separate time blocks. Any drift across the sweep then
+# lands directly in their difference — and the gate cost IS that difference.
+# On 2026-08-16 raw drifted -8.2% while gated held roughly flat, so the
+# reported gate cost (median gated - median raw)/2 = 7.6 ns took its raw
+# term from repetition 1/3 and its gated term from repetition 5. The median
+# of the per-repetition differences was 10.0 ns: the paper understated its
+# own gate cost by 24% purely from ordering.
+#
+# Repetition-major puts rep k of every transport within seconds of rep k of
+# every other, so drift is common-mode and cancels in the difference.
+for k in $(seq 1 "$REPS"); do
+    for b in "${REQ[@]}"; do
+        run_one "$b" "$ART_DIR/_${b}.rep${k}.csv" "$k" "$REPS" || true
+    done
 done
 
 # --- Aeron media driver ------------------------------------------------------

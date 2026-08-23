@@ -220,6 +220,34 @@ def main() -> int:
             summary["headline"]["rounding_stable"] = None
             line("info", "need 3+ repetitions to judge rounding stability")
 
+        # Paired vs unpaired estimator.
+        #
+        # The paper computes (median gated - median raw)/2 from independently
+        # merged columns, so the two terms can come from different
+        # repetitions in different machine states. The paired estimator --
+        # median of the per-repetition differences -- is immune to that.
+        # When they disagree materially, the sweep's ordering is biasing the
+        # headline, which is exactly what benchmark-major ordering did before
+        # the sweep was interleaved.
+        if len(perRep) >= 3:
+            paired = statistics.median(perRep)
+            summary["headline"]["gate_ns_paired"] = round(paired, 3)
+            skew = (paired - gate) / paired * 100 if paired else 0.0
+            summary["headline"]["paired_vs_unpaired_pct"] = round(skew, 1)
+            if abs(skew) > 10:
+                line("WARN", f"paired estimator says {paired:.2f} ns, the "
+                             f"unpaired one the paper prints says {gate:.2f} ns "
+                             f"({skew:+.0f}%)")
+                problems.append(
+                    f"the reported gate cost ({gate:.2f} ns) disagrees with the "
+                    f"paired per-repetition estimate ({paired:.2f} ns) by "
+                    f"{skew:+.0f}%. Merging each column independently lets the "
+                    f"raw and gated terms come from different repetitions; "
+                    f"check the sweep is interleaving repetitions")
+            else:
+                line("ok", f"paired estimator agrees: {paired:.2f} ns "
+                           f"vs {gate:.2f} ns ({skew:+.0f}%)")
+
     else:
         line("FAIL", "astra_raw or astra_gated missing at 256 B")
         problems.append("headline transports missing from paper1_figure_1.csv")

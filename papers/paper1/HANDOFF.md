@@ -105,6 +105,28 @@ submission whether to quote a range, add cross-run spread to
    reps would tighten it enough for an integer. `paper1_run_report.py`
    now computes the per-repetition range and fails the run when the
    printed digit is not reproducible.
+4b. **The sweep used to bias its own headline by 24%, now fixed.** This
+   was the worst thing the new tooling found, and it was invisible to
+   every previous check. The sweep ran benchmark-major: all five
+   `astra` repetitions finished before the first `astra_gated`
+   repetition began, so raw and gated were measured in two separate
+   time blocks. Because the gate cost *is* their difference, any drift
+   across the sweep landed straight in it. On 2026-08-16 raw drifted
+   −8.2% while gated stayed roughly flat, and since medians are taken
+   per column, the reported `(median gated − median raw)/2 = 7.6 ns`
+   took its raw term from repetition 1/3 and its gated term from
+   repetition 5 — two different machine states. The median of the
+   per-repetition differences was **10.0 ns**. The paper was
+   understating its own gate cost by 24%, and the artefact ships every
+   per-repetition CSV, so a reviewer could have derived that.
+   `run_paper1_sweep.sh` is now repetition-major for the required
+   baselines, so rep *k* of every transport runs within seconds of rep
+   *k* of the others and drift becomes common-mode. `run_report` also
+   compares the paired and unpaired estimators and fails the run when
+   they diverge by more than 10%, so this cannot come back quietly.
+   **Every number in the current draft predates this fix and must be
+   re-measured.**
+
 5. **Byline and affiliations** in `main.tex` — camera-ready only, the
    submission stays anonymous. The `\else` branch still carries two
    placeholder names against a five-engineer team.
