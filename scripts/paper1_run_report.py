@@ -1,0 +1,379 @@
+#!/usr/bin/env python3
+# =============================================================================
+# Astra Runtime - Paper 1 run quality report
+# scripts/paper1_run_report.py
+#
+# Answers one question: is this sweep good enough to put in a paper?
+#
+# The sweep already tells you WHAT it measured. This tells you whether to
+# trust it, and when it is bad, which of the known failure modes it hit.
+# Every check here exists because it caught something real:
+#
+#   thermal drift      later repetitions systematically slower than earlier
+#                      ones. This is what produced 101 CoV cells on the
+#                      laptop, and it is invisible in the merged medians.
+#   rounding stability the headline gate cost is printed as an integer but
+#                      derived as (gated-raw)/2. When the true value sits
+#                      near a .5 boundary the printed digit flips between
+#                      runs on noise alone (7 vs 8 ns, 2026-08-16).
+#   tail ratio         p99.99/p50. A transport whose far tail is 1000x its
+#                      median is reporting scheduler behaviour, not itself.
+#   payload monotonic  latency must rise with payload. If it does not, the
+#                      harness is measuring something other than transfer.
+#   O(1) flatness      validate() must not track pool occupancy. Flatness
+#                      IS the paper's Q2 claim, so it is asserted, not eyeballed.
+#
+# Writes a human report to stdout and a machine-readable summary to
+# --json, which scripts/paper1_compare_runs.py diffs across runs.
+#
+# Usage:
+#   python3 scripts/paper1_run_report.py --artefact artefact/
+#   python3 scripts/paper1_run_report.py --artefact artefact/ --json artefact/run_summary.json
+# =============================================================================
+
+from __future__ import annotations
+
+import argparse
+import csv
+import glob
+import json
+import os
+import re
+import statistics
+import sys
+from pathlib import Path
+
+CANON = 256          # canonical payload the paper quotes
+POOL_FULL = 4090     # occupancy gen_numbers_tex.py reads validate() from
+
+
+def loadCsv(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    with path.open() as f:
+        return list(csv.DictReader(f))
+
+
+def num(row: dict, col: str) -> float | None:
+    try:
+        return float(row[col])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def p99At(rows: list[dict], transport: str, payload: int) -> float | None:
+    for r in rows:
+        if r.get("transport") != transport:
+            continue
+        if num(r, "payload_bytes") != payload:
+            continue
+        return num(r, "p99_ns")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Check 1: thermal drift across repetitions.
+#
+# The merged CSV hides this completely: a median over five runs that were
+# each progressively slower looks identical to a median over five stable
+# runs. So we go back to the per-repetition files the sweep keeps.
+# ---------------------------------------------------------------------------
+def repDrift(artefact: Path) -> list[dict]:
+    findings = []
+    pattern = str(artefact / "_bench_*.rep*.csv")
+    byBench: dict[str, dict[int, Path]] = {}
+    for p in glob.glob(pattern):
+        m = re.match(r"_(.+)\.rep(\d+)\.csv$", os.path.basename(p))
+        if not m:
+            continue
+        byBench.setdefault(m.group(1), {})[int(m.group(2))] = Path(p)
+
+    for bench, reps in sorted(byBench.items()):
+        if len(reps) < 3:
+            continue
+        series: list[tuple[int, float]] = []
+        for k in sorted(reps):
+            rows = loadCsv(reps[k])
+            vals = [num(r, "p99_ns") for r in rows
+                    if num(r, "payload_bytes") == CANON]
+            vals = [v for v in vals if v]
+            if vals:
+                series.append((k, statistics.median(vals)))
+        if len(series) < 3:
+            continue
+        first, last = series[0][1], series[-1][1]
+        drift = (last - first) / first * 100 if first else 0.0
+        # Spearman-style monotonicity: how many steps go the same way as
+        # the overall trend. A clean thermal ramp scores near 1.0.
+        steps = [series[i + 1][1] - series[i][1] for i in range(len(series) - 1)]
+        same = sum(1 for s in steps if (s > 0) == (drift > 0))
+        findings.append({
+            "bench": bench,
+            "drift_pct": round(drift, 2),
+            "monotonic_frac": round(same / len(steps), 2) if steps else 0.0,
+            "series": [round(v, 1) for _, v in series],
+        })
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Per-repetition gate cost.
+#
+# The paper prints the gate cost as an integer, but derives it as
+# (gated - raw)/2 from two independently noisy measurements. Whether that
+# integer is trustworthy is an empirical question, not a threshold we get
+# to pick: compute the gate cost separately for every repetition and look
+# at the spread. If the spread straddles a .5 boundary, the printed digit
+# is a coin flip and the paper should quote a range instead.
+# ---------------------------------------------------------------------------
+def gatePerRep(artefact: Path) -> list[float]:
+    def repMap(bench: str) -> dict[int, float]:
+        out: dict[int, float] = {}
+        for p in glob.glob(str(artefact / f"_{bench}.rep*.csv")):
+            m = re.search(r"\.rep(\d+)\.csv$", os.path.basename(p))
+            if not m:
+                continue
+            for r in loadCsv(Path(p)):
+                if num(r, "payload_bytes") == CANON:
+                    v = num(r, "p99_ns")
+                    if v:
+                        out[int(m.group(1))] = v
+        return out
+
+    raws = repMap("bench_baseline_astra_raw")
+    gats = repMap("bench_baseline_astra_gated")
+    return [(gats[k] - raws[k]) / 2.0
+            for k in sorted(set(raws) & set(gats))]
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--artefact", type=Path, default=Path("artefact"))
+    ap.add_argument("--json", type=Path, default=None)
+    ap.add_argument("--drift-warn", type=float, default=3.0,
+                    help="percent p99 drift between first and last rep")
+    ap.add_argument("--tail-warn", type=float, default=100.0,
+                    help="p99.99/p50 ratio above which a tail is scheduler noise")
+    ap.add_argument("--flat-warn", type=float, default=10.0,
+                    help="percent spread in validate p99 across pool occupancy")
+    args = ap.parse_args()
+
+    A = args.artefact
+    f1   = loadCsv(A / "paper1_figure_1.csv")
+    pool = loadCsv(A / "paper1_pool_scaling.csv")
+    rev  = loadCsv(A / "paper1_revocation.csv")
+    mpsc = loadCsv(A / "paper1_throughput_mpsc.csv")
+    perf = loadCsv(A / "paper1_perfcounters.csv")
+
+    summary: dict = {"artefact": str(A), "checks": {}, "headline": {}, "gates": {}}
+    problems: list[str] = []
+    notes: list[str] = []
+
+    def line(tag: str, msg: str) -> None:
+        print(f"  {tag:<5} {msg}")
+
+    print("=" * 72)
+    print("PAPER 1 RUN QUALITY REPORT")
+    print("=" * 72)
+
+    # -- headline numbers -----------------------------------------------
+    raw = p99At(f1, "astra_raw", CANON)
+    gat = p99At(f1, "astra_gated", CANON)
+    aer = p99At(f1, "aeron", CANON)
+    print("\n[1] Headline")
+    if raw and gat:
+        gate = (gat - raw) / 2.0
+        pct = (gat - raw) / raw * 100
+        summary["headline"] = {"raw_p99": raw, "gated_p99": gat,
+                              "gate_ns": round(gate, 3), "gate_pct": round(pct, 2)}
+        line("info", f"raw {raw:.1f} ns, gated {gat:.1f} ns")
+        line("info", f"gate cost {gate:.2f} ns ({pct:.1f}% of raw RTT)")
+
+        # Rounding stability, measured rather than assumed.
+        perRep = gatePerRep(A)
+        summary["headline"]["prints_as"] = round(gate)
+        summary["headline"]["gate_per_rep"] = [round(v, 3) for v in perRep]
+        if len(perRep) >= 3:
+            lo, hi = min(perRep), max(perRep)
+            ints = sorted({round(v) for v in perRep})
+            summary["headline"]["rounding_stable"] = len(ints) == 1
+            summary["headline"]["gate_range_ns"] = [round(lo, 2), round(hi, 2)]
+            line("info", f"per-repetition gate cost {lo:.2f}..{hi:.2f} ns "
+                         f"(n={len(perRep)})")
+            if len(ints) == 1:
+                line("ok", f"rounding stable: every repetition prints as {ints[0]} ns")
+            else:
+                line("WARN", f"rounding UNSTABLE: repetitions print as "
+                             f"{'/'.join(str(i) for i in ints)} ns")
+                problems.append(
+                    f"the printed gate cost is not reproducible across "
+                    f"repetitions of this same run (prints as "
+                    f"{'/'.join(str(i) for i in ints)}); quote the range "
+                    f"{lo:.1f} to {hi:.1f} ns rather than a single integer")
+        else:
+            summary["headline"]["rounding_stable"] = None
+            line("info", "need 3+ repetitions to judge rounding stability")
+
+    else:
+        line("FAIL", "astra_raw or astra_gated missing at 256 B")
+        problems.append("headline transports missing from paper1_figure_1.csv")
+
+    # -- thermal drift ---------------------------------------------------
+    print("\n[2] Thermal drift across repetitions")
+    drift = repDrift(A)
+    summary["checks"]["rep_drift"] = drift
+    if not drift:
+        line("info", "no per-repetition CSVs found (need 3+ reps to judge)")
+    for d in drift:
+        bad = abs(d["drift_pct"]) > args.drift_warn and d["monotonic_frac"] >= 0.6
+        tag = "WARN" if bad else "ok"
+        line(tag, f"{d['bench']}: {d['drift_pct']:+.1f}% first->last, "
+                  f"monotonic {d['monotonic_frac']:.0%}, series {d['series']}")
+        if bad:
+            problems.append(f"{d['bench']} drifts {d['drift_pct']:+.1f}% across reps, "
+                            "monotonically: thermal or frequency instability")
+
+    # -- tail health -----------------------------------------------------
+    print("\n[3] Tail health (p99.99 / p50 at 256 B)")
+    tails = {}
+    for r in f1:
+        if num(r, "payload_bytes") != CANON:
+            continue
+        p50, p9999 = num(r, "p50_ns"), num(r, "p9999_ns")
+        if not p50 or not p9999:
+            continue
+        ratio = p9999 / p50
+        tails[r["transport"]] = round(ratio, 1)
+        tag = "WARN" if ratio > args.tail_warn else "ok"
+        line(tag, f"{r['transport']:<14} {ratio:>8.1f}x")
+    summary["checks"]["tail_ratio"] = tails
+
+    # -- payload monotonicity -------------------------------------------
+    print("\n[4] Latency rises with payload")
+    mono = {}
+    byT: dict[str, list[tuple[float, float]]] = {}
+    for r in f1:
+        pb, p99 = num(r, "payload_bytes"), num(r, "p99_ns")
+        if pb and p99:
+            byT.setdefault(r["transport"], []).append((pb, p99))
+    for t, pts in sorted(byT.items()):
+        pts.sort()
+        inversions = sum(1 for i in range(len(pts) - 1) if pts[i + 1][1] < pts[i][1])
+        mono[t] = inversions
+        tag = "WARN" if inversions else "ok"
+        line(tag, f"{t:<14} {inversions} inversion(s) across {len(pts)} payloads")
+        if inversions:
+            problems.append(f"{t} latency does not rise with payload "
+                            f"({inversions} inversions): suspect the harness")
+    summary["checks"]["payload_inversions"] = mono
+
+    # -- O(1) flatness, the Q2 claim ------------------------------------
+    print("\n[5] O(1) validate flatness (paper's Q2 claim)")
+    vals = [(num(r, "pool_active"), num(r, "p99_ns")) for r in pool]
+    vals = [(a, b) for a, b in vals if a and b]
+    if len(vals) >= 2:
+        ys = [b for _, b in vals]
+        spread = (max(ys) - min(ys)) / statistics.median(ys) * 100
+        ok = spread <= args.flat_warn
+        summary["gates"]["o1_flatness_pct"] = round(spread, 2)
+        summary["gates"]["o1_flatness_pass"] = ok
+        line("ok" if ok else "FAIL",
+             f"validate p99 spread {spread:.1f}% across occupancy "
+             f"{int(min(a for a,_ in vals))}..{int(max(a for a,_ in vals))}")
+        if not ok:
+            problems.append(f"validate p99 varies {spread:.1f}% with pool occupancy; "
+                            "the O(1) claim in Q2 is not supported by this run")
+        if not any(a == POOL_FULL for a, _ in vals):
+            line("WARN", f"no pool_active={POOL_FULL} row; gen_numbers_tex.py reads "
+                         f"validate numbers from exactly that occupancy and will "
+                         f"emit nothing")
+            problems.append(f"pool sweep has no {POOL_FULL} row: validate macros "
+                            "will stay red placeholders")
+    else:
+        line("info", "pool scaling CSV absent or too small")
+
+    # -- thesis gate -----------------------------------------------------
+    print("\n[6] Thesis gates")
+    if raw and gat:
+        gate = (gat - raw) / 2.0
+        ok = gate <= 50
+        summary["gates"]["thesis_x_pass"] = ok
+        line("ok" if ok else "FAIL", f"gate cost {gate:.2f} ns <= 50 ns design target")
+    if aer and gat:
+        summary["gates"]["aeron_gap_pct"] = round((gat - aer) / aer * 100, 1)
+        line("info", f"Aeron gap {(gat-aer)/aer*100:+.1f}% (negative = we are faster)")
+
+    # Aeron p50 bracketing: §6.2 argues the published ~250 ns at 100 B falls
+    # between our 64 B and 256 B measurements. That sentence silently breaks
+    # if a re-run moves either endpoint past 250, so assert it.
+    a64 = None
+    for r in f1:
+        if r.get("transport") == "aeron" and num(r, "payload_bytes") == 64:
+            a64 = num(r, "p50_ns")
+    a256 = None
+    for r in f1:
+        if r.get("transport") == "aeron" and num(r, "payload_bytes") == CANON:
+            a256 = num(r, "p50_ns")
+    if a64 and a256:
+        brack = a64 < 250 < a256
+        summary["gates"]["aeron_bracket_pass"] = brack
+        line("ok" if brack else "WARN",
+             f"Aeron p50 brackets published 250 ns: {a64:.0f} < 250 < {a256:.0f}")
+        if not brack:
+            problems.append("Aeron p50 no longer brackets the published 250 ns "
+                            "figure; the faithfulness argument in 6.2 needs rewording")
+
+    # -- coverage --------------------------------------------------------
+    print("\n[7] Coverage")
+    for name, rows, why in (("figure_1", f1, "Table 1 + Figure 1"),
+                            ("pool_scaling", pool, "Figure 2, validate macros"),
+                            ("throughput_mpsc", mpsc, "Figure 3"),
+                            ("revocation", rev, "Figure 4, revokeTail"),
+                            ("perfcounters", perf, "Table 2 / 6.5")):
+        tag = "ok" if rows else "WARN"
+        line(tag, f"{name:<16} {len(rows):>5} rows   ({why})")
+        if not rows:
+            problems.append(f"{name} empty: {why} will not render")
+    summary["checks"]["row_counts"] = {
+        "figure_1": len(f1), "pool_scaling": len(pool), "throughput_mpsc": len(mpsc),
+        "revocation": len(rev), "perfcounters": len(perf)}
+
+    # -- CoV, read back from the sweep's own report ----------------------
+    print("\n[8] Cross-repetition stability")
+    cov = A / "paper1_cov_report.txt"
+    if cov.exists():
+        text = cov.read_text()
+        over = text.count("WARN")
+        total = over + text.count("ok  ")
+        summary["checks"]["cov_over"] = over
+        summary["checks"]["cov_total"] = total
+        tag = "ok" if over == 0 else "WARN"
+        line(tag, f"{over} of {total} cells exceed the 5% threshold")
+        if over:
+            problems.append(f"{over} cells over 5% CoV; 6.2 must describe this "
+                            "rather than claim cells were re-measured")
+    else:
+        line("info", "no CoV report found")
+
+    # -- verdict ---------------------------------------------------------
+    print("\n" + "=" * 72)
+    if problems:
+        print(f"VERDICT: {len(problems)} issue(s) to address before trusting this run")
+        for i, p in enumerate(problems, 1):
+            print(f"  {i}. {p}")
+    else:
+        print("VERDICT: clean. Every check passed.")
+    print("=" * 72)
+    summary["problems"] = problems
+    summary["clean"] = not problems
+
+    if args.json:
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        args.json.write_text(json.dumps(summary, indent=2) + "\n")
+        print(f"\nmachine-readable summary -> {args.json}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

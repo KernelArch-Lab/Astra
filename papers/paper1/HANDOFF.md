@@ -88,8 +88,23 @@ submission whether to quote a range, add cross-run spread to
    Aeron's far tail is brutal at every payload — p99.99 of 219 µs at
    64 B against a 226 ns p50 is ~1000x, and max hits 65.8 ms at 16 KB.
    That is exactly why §6.2 and §7.2 build nothing on its p99.
-4. **Decide how precisely to quote the gate cost** — see the spread
-   note above the numbers table.
+4. **Quote the gate cost as a range, not an integer.** This is now
+   settled by analysis rather than opinion. Gate cost is
+   (gated − raw)/2, a small difference between two larger noisy
+   numbers, so it amplifies their noise: at raw ≈ 66 and gated ≈ 81
+   with ~1% per-run noise on each, the delta carries about ±1 ns and
+   the halved value about ±0.5 ns on a 7.5 ns result. A dry run on
+   *synthetic data with only 1.2% noise and zero CoV warnings* still
+   produced a per-repetition gate cost of 6.65 to 7.80 ns, printing as
+   7 or 8 depending on which repetition you read. **Better hardware
+   will not fix this** — it is error propagation, not thermal drift, so
+   the earlier note suggesting a server would resolve it was wrong.
+   Options, in order of preference: quote one decimal with the observed
+   range ("7.4 ns, 6.7 to 7.8 across five repetitions"), or raise the
+   repetition count, since the median's spread falls as 1/√n and ~50
+   reps would tighten it enough for an integer. `paper1_run_report.py`
+   now computes the per-repetition range and fails the run when the
+   printed digit is not reproducible.
 5. **Byline and affiliations** in `main.tex` — camera-ready only, the
    submission stays anonymous. The `\else` branch still carries two
    placeholder names against a five-engineer team.
@@ -109,6 +124,41 @@ submission whether to quote a range, add cross-run spread to
    because we do less" framing carries more weight than when it was
    written, not less.
 8. ~~Macrobench in or out.~~ **Decided: out** — see `outline.md` §7.
+
+## Monitoring and run quality
+
+Three tools answer "is this run any good, and did my change help":
+
+```bash
+python3 scripts/paper1_env_guard.py                       # BEFORE a sweep
+python3 scripts/paper1_run_report.py --artefact artefact/ --json artefact/run_summary.json
+python3 scripts/paper1_compare_runs.py before.json after.json
+```
+
+`compile-astra.sh paper1` now runs the first two automatically: the guard
+before the sweep, the report after it.
+
+**The guard aborts the sweep on a hard failure**, because its whole point
+is to not waste an hour. The failure it exists for is benchmark cores
+split across NUMA nodes, which routes the IPC ring over the socket
+interconnect and inflates every latency with nothing in the output to
+show it. That cannot be detected after the fact, only prevented. It also
+warns about turbo, SMT, missing isolation flags, `perf_event_paranoid`,
+virtualisation (no PMU means no Table 2), and non-zero steal time.
+Override with `ASTRA_ALLOW_BAD_ENV=1` if you must.
+
+The report checks eight things, each because it caught something real:
+thermal drift across repetitions (invisible in merged medians, and the
+actual cause of the 101 CoV cells), rounding stability of the headline,
+tail ratios, payload monotonicity, O(1) flatness as an assertion rather
+than an eyeball, the thesis gate, the Aeron p50 bracketing that §6.2's
+faithfulness argument depends on, and coverage of every CSV the paper
+needs. It writes `run_summary.json`; the comparator diffs two of those
+and labels each metric better or worse in the correct direction.
+
+All three were validated on synthetic data before first use, including a
+deliberately bad dataset to confirm the checks fire rather than staying
+quiet.
 
 ## Things worth knowing before changing anything
 

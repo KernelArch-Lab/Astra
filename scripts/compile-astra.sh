@@ -352,6 +352,24 @@ cmd_sweep() {
         "$REPO_ROOT/scripts/check_paper1_env.sh" || warn "Some optional Paper-1 deps missing; sweep may emit SKIPPED rows."
     fi
 
+    # Environment guard. Refuses hosts that would silently produce numbers
+    # you cannot publish — chiefly benchmark cores split across NUMA nodes,
+    # which routes the IPC ring over the socket interconnect and inflates
+    # every latency with no visible error. Override with ASTRA_ALLOW_BAD_ENV=1.
+    if [[ -x "$REPO_ROOT/scripts/paper1_env_guard.py" ]]; then
+        mkdir -p "$ARTEFACT_DIR"
+        if ! python3 "$REPO_ROOT/scripts/paper1_env_guard.py" \
+                --json "$ARTEFACT_DIR/environment_guard.json"; then
+            if [[ "${ASTRA_ALLOW_BAD_ENV:-0}" == "1" ]]; then
+                warn "Environment guard failed but ASTRA_ALLOW_BAD_ENV=1 — continuing."
+            else
+                err "Environment guard refused this host. Fix the failures above,"
+                err "or set ASTRA_ALLOW_BAD_ENV=1 to run anyway (numbers will not be publishable)."
+                return 1
+            fi
+        fi
+    fi
+
     info "Running Paper-1 benchmark sweep (sudo recommended for perfcounters)"
     if [[ $EUID -ne 0 ]]; then
         warn "Not running as root — bench_perfcounters may self-skip if perf_event_paranoid > 1."
@@ -363,6 +381,16 @@ cmd_sweep() {
         ls -1 "$ARTEFACT_DIR" | sed 's/^/    /'
     else
         warn "Sweep finished but no CSVs found at $ARTEFACT_DIR/"
+    fi
+
+    # Run quality report. The sweep says what it measured; this says whether
+    # to trust it, and writes a summary that paper1_compare_runs.py can diff
+    # against a later run to show whether a change actually helped.
+    if [[ -x "$REPO_ROOT/scripts/paper1_run_report.py" ]]; then
+        echo
+        python3 "$REPO_ROOT/scripts/paper1_run_report.py" \
+            --artefact "$ARTEFACT_DIR" \
+            --json "$ARTEFACT_DIR/run_summary.json" || true
     fi
 }
 
