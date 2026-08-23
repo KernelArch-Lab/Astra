@@ -14,10 +14,8 @@
 
 #include <astra/asm_core/asm_core.h>
 
-#include <algorithm>
 #include <chrono>
 #include <cstdint>
-#include <limits>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -147,13 +145,19 @@ void test_ct_compare_timing_independence()
     (void)fnTimed(lVB.data());
     (void)fnTimed(lVC.data());
 
+    // Track the minima by hand rather than via std::min. duration::rep is
+    // `long` on Linux x86_64 and `long long` on macOS — both 64-bit but
+    // distinct types, so std::min(long long, long) fails to deduce. An
+    // explicit cast keeps this portable and keeps %lld correct below.
     constexpr int iTrials = 9;
-    long long lINsFirst = std::numeric_limits<long long>::max();
-    long long lINsLast  = std::numeric_limits<long long>::max();
+    long long lINsFirst = -1;
+    long long lINsLast  = -1;
     for (int t = 0; t < iTrials; ++t)
     {
-        lINsFirst = std::min(lINsFirst, fnTimed(lVB.data()));
-        lINsLast  = std::min(lINsLast,  fnTimed(lVC.data()));
+        const long long lIF = static_cast<long long>(fnTimed(lVB.data()));
+        const long long lIL = static_cast<long long>(fnTimed(lVC.data()));
+        if (lINsFirst < 0 || lIF < lINsFirst) lINsFirst = lIF;
+        if (lINsLast  < 0 || lIL < lINsLast)  lINsLast  = lIL;
     }
 
     double lFRatio = (lINsFirst > lINsLast)
