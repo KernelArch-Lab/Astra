@@ -127,23 +127,29 @@ def repDrift(artefact: Path) -> list[dict]:
 # is a coin flip and the paper should quote a range instead.
 # ---------------------------------------------------------------------------
 def gatePerRep(artefact: Path) -> list[float]:
-    def repMap(bench: str) -> dict[int, float]:
-        out: dict[int, float] = {}
-        for p in glob.glob(str(artefact / f"_{bench}.rep*.csv")):
-            m = re.search(r"\.rep(\d+)\.csv$", os.path.basename(p))
-            if not m:
+    # Key on the transport column, not the filename. The raw baseline binary
+    # is bench_baseline_astra while its transport is astra_raw, so matching
+    # on filenames silently found nothing and the check quietly skipped.
+    perRep: dict[int, dict[str, float]] = {}
+    for path in glob.glob(str(artefact / "_*.rep*.csv")):
+        m = re.search(r"\.rep(\d+)\.csv$", os.path.basename(path))
+        if not m:
+            continue
+        rep = int(m.group(1))
+        for r in loadCsv(Path(path)):
+            if num(r, "payload_bytes") != CANON:
                 continue
-            for r in loadCsv(Path(p)):
-                if num(r, "payload_bytes") == CANON:
-                    v = num(r, "p99_ns")
-                    if v:
-                        out[int(m.group(1))] = v
-        return out
+            v = num(r, "p99_ns")
+            if v:
+                perRep.setdefault(rep, {})[r.get("transport", "")] = v
 
-    raws = repMap("bench_baseline_astra_raw")
-    gats = repMap("bench_baseline_astra_gated")
-    return [(gats[k] - raws[k]) / 2.0
-            for k in sorted(set(raws) & set(gats))]
+    out: list[float] = []
+    for rep in sorted(perRep):
+        raw = perRep[rep].get("astra_raw")
+        gat = perRep[rep].get("astra_gated")
+        if raw and gat:
+            out.append((gat - raw) / 2.0)
+    return out
 
 
 def main() -> int:
