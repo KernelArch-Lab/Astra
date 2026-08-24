@@ -1,13 +1,14 @@
 # Paper 1 — session handoff
 
-State as of 2026-08-18, HEAD `6fe0317`. Read this first when picking
-the work back up; it is written to be self-contained.
+State as of 2026-08-24. Read this first when picking the work back up;
+it is written to be self-contained.
 
-The editorial pass is done: Aeron measured, §6.2's CoV claim and Aeron
-validation corrected, the O(n)-scan number removed, the io_uring
-harness disclosed, §6.8's hardware fixed, and Table 3 captioned. What
-remains is one measured number, two judgement calls, and the hardware
-decision described below.
+Both the editorial pass and the measurement-methodology pass are done.
+The methodology pass mattered more: the sweep was biasing its own
+headline number by 24% through block ordering, and no previous check
+could see it. That is fixed, re-measured at 15 interleaved repetitions,
+and the estimators now agree exactly. What remains is one unmeasured
+number, the byline, and the hardware question.
 
 ## Where the paper stands
 
@@ -19,11 +20,12 @@ anonymised submission tarball that rebuilds standalone.
 One command does the whole thing on the Fedora box:
 
 ```bash
-./scripts/compile-astra.sh paper1        # --quick for a 1-rep smoke run
+./scripts/compile-astra.sh paper1 --reps 15   # --quick for a 1-rep smoke run
 ```
 
 deps → sysctls → governor → Aeron autobuild → Release build → ctest →
-CBMC → 5-repetition sweep → figures + numbers → PDF + checklist →
+CBMC → env guard → 15-rep interleaved sweep → figures + numbers →
+run-quality report → PDF + checklist →
 anonymised tarball → summary with thesis-gate verdicts.
 
 ## Measured numbers
@@ -92,48 +94,36 @@ meet a variance bar by construction — while p50 and p99 are 6 of 74.
    226 ns is only ~10% under 250. If a future sweep pushes Aeron's 64 B
    p50 above 250 ns the bracketing breaks, so re-read that sentence
    whenever Aeron is re-measured.
-   Aeron's far tail is brutal at every payload — p99.99 of 219 µs at
-   64 B against a 226 ns p50 is ~1000x, and max hits 65.8 ms at 16 KB.
-   That is exactly why §6.2 and §7.2 build nothing on its p99.
-4. **Quote the gate cost as a range, not an integer.** This is now
-   settled by analysis rather than opinion. Gate cost is
-   (gated − raw)/2, a small difference between two larger noisy
-   numbers, so it amplifies their noise: at raw ≈ 66 and gated ≈ 81
-   with ~1% per-run noise on each, the delta carries about ±1 ns and
-   the halved value about ±0.5 ns on a 7.5 ns result. A dry run on
-   *synthetic data with only 1.2% noise and zero CoV warnings* still
-   produced a per-repetition gate cost of 6.65 to 7.80 ns, printing as
-   7 or 8 depending on which repetition you read. **Better hardware
-   will not fix this** — it is error propagation, not thermal drift, so
-   the earlier note suggesting a server would resolve it was wrong.
-   Options, in order of preference: quote one decimal with the observed
-   range ("7.4 ns, 6.7 to 7.8 across five repetitions"), or raise the
-   repetition count, since the median's spread falls as 1/√n and ~50
-   reps would tighten it enough for an integer. `paper1_run_report.py`
-   now computes the per-repetition range and fails the run when the
-   printed digit is not reproducible.
-4b. **The sweep used to bias its own headline by 24%, now fixed.** This
-   was the worst thing the new tooling found, and it was invisible to
-   every previous check. The sweep ran benchmark-major: all five
-   `astra` repetitions finished before the first `astra_gated`
-   repetition began, so raw and gated were measured in two separate
-   time blocks. Because the gate cost *is* their difference, any drift
-   across the sweep landed straight in it. On 2026-08-16 raw drifted
-   −8.2% while gated stayed roughly flat, and since medians are taken
-   per column, the reported `(median gated − median raw)/2 = 7.6 ns`
-   took its raw term from repetition 1/3 and its gated term from
-   repetition 5 — two different machine states. The median of the
-   per-repetition differences was **10.0 ns**. The paper was
-   understating its own gate cost by 24%, and the artefact ships every
-   per-repetition CSV, so a reviewer could have derived that.
-   `run_paper1_sweep.sh` is now repetition-major for the required
-   baselines, so rep *k* of every transport runs within seconds of rep
-   *k* of the others and drift becomes common-mode. `run_report` also
-   compares the paired and unpaired estimators and fails the run when
-   they diverge by more than 10%, so this cannot come back quietly.
-   **Every number in the current draft predates this fix and must be
-   re-measured.**
-
+   At 15 reps the bracketing still holds (227 < 250 < 334) but Aeron is
+   the least stable row in the table: trend −5.5%, spread 34.3%, and its
+   p99.99/p50 ratio is 45x. Better than the 1655x seen before the
+   warm-up increase, but still the reason §6.2 and §7.2 build nothing on
+   its p99.
+4. **Quote the gate cost with its confidence interval.** Settled by
+   measurement, not opinion. Gate cost is (gated − raw)/2, a difference
+   between two noisy quantities, so it amplifies both. At n=15 the
+   per-repetition values still span roughly a factor of two, but the
+   *median* is now well determined and the paired and unpaired
+   estimators agree to +0%. `paper1_run_report.py` bootstraps a 95% CI
+   on the median (2000 resamples, fixed seed) and warns only when that
+   interval straddles a rounding boundary — which it does, and will at
+   any n given this spread. So quote 7.3 ns with the interval from
+   `run_summary.json`. Raising reps further tightens the CI as 1/√n if
+   you want a defensible bare integer, but it is not needed: the
+   argument is an order of magnitude against a 50 ns target.
+4b. ~~The sweep biased its own headline by 24%.~~ **Fixed and
+   re-measured.** It ran benchmark-major: all `astra` repetitions
+   finished before the first `astra_gated` repetition, so raw and gated
+   were measured in separate time blocks. Since the gate cost *is* their
+   difference, drift across the sweep landed straight in it — and
+   because medians are taken per column, the reported 7.6 ns combined a
+   raw term from one repetition with a gated term from another. Paired
+   differencing gave 10.0 ns: the draft understated its own gate cost by
+   24%, derivable by any reviewer from the shipped per-repetition CSVs.
+   `run_paper1_sweep.sh` is now repetition-major, and `run_report`
+   compares both estimators and fails the run when they diverge past
+   10%. At n=15 they agree to +0%. Keep the check: this class of bug is
+   invisible in merged output.
 5. **Byline and affiliations** in `main.tex` — camera-ready only, the
    submission stays anonymous. The `\else` branch still carries two
    placeholder names against a five-engineer team.
