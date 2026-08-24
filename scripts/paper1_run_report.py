@@ -39,6 +39,7 @@ import glob
 import json
 import os
 import re
+import random
 import statistics
 import sys
 from pathlib import Path
@@ -210,21 +211,33 @@ def main() -> int:
         summary["headline"]["gate_per_rep"] = [round(v, 3) for v in perRep]
         if len(perRep) >= 3:
             lo, hi = min(perRep), max(perRep)
-            ints = sorted({round(v) for v in perRep})
-            summary["headline"]["rounding_stable"] = len(ints) == 1
             summary["headline"]["gate_range_ns"] = [round(lo, 2), round(hi, 2)]
             line("info", f"per-repetition gate cost {lo:.2f}..{hi:.2f} ns "
                          f"(n={len(perRep)})")
-            if len(ints) == 1:
-                line("ok", f"rounding stable: every repetition prints as {ints[0]} ns")
-            else:
-                line("WARN", f"rounding UNSTABLE: repetitions print as "
-                             f"{'/'.join(str(i) for i in ints)} ns")
+
+            # The question is NOT whether individual repetitions round to the
+            # same integer — with this much per-rep variance they never will,
+            # at any n. The question is how tightly the MEDIAN is pinned down,
+            # because the median is what the paper prints. Bootstrap it.
+            random.seed(20260824)          # deterministic: a report is evidence
+            meds = sorted(statistics.median(random.choices(perRep, k=len(perRep)))
+                          for _ in range(2000))
+            ciLo, ciHi = meds[int(0.025 * len(meds))], meds[int(0.975 * len(meds))]
+            summary["headline"]["gate_ci95_ns"] = [round(ciLo, 2), round(ciHi, 2)]
+            spansBoundary = round(ciLo) != round(ciHi)
+            summary["headline"]["rounding_stable"] = not spansBoundary
+            line("info", f"median 95% CI {ciLo:.2f}..{ciHi:.2f} ns "
+                         f"({len(perRep)} reps, 2000 bootstrap resamples)")
+            if spansBoundary:
+                line("WARN", f"the CI spans a rounding boundary: prints as "
+                             f"{round(ciLo)} or {round(ciHi)} ns depending on the draw")
                 problems.append(
-                    f"the printed gate cost is not reproducible across "
-                    f"repetitions of this same run (prints as "
-                    f"{'/'.join(str(i) for i in ints)}); quote the range "
-                    f"{lo:.1f} to {hi:.1f} ns rather than a single integer")
+                    f"the gate cost CI is {ciLo:.1f} to {ciHi:.1f} ns, which "
+                    f"straddles a rounding boundary. Quote {gate:.1f} ns with "
+                    f"that interval rather than a bare integer")
+            else:
+                line("ok", f"median is pinned to {round(ciLo)} ns across the "
+                           f"whole CI; a bare integer is defensible")
         else:
             summary["headline"]["rounding_stable"] = None
             line("info", "need 3+ repetitions to judge rounding stability")

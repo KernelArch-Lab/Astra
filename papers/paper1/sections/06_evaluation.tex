@@ -52,10 +52,16 @@ as a systematic drift across repetitions on exactly those rows.
 \textbf{Percentiles} come from sort-and-index over the full sample,
 with no HDR-bucket approximation; the artefact ships every
 per-repetition CSV alongside the merged medians.
-\textbf{Repetitions.} Every configuration runs five times end to end,
-each in a fresh process. We report the median run, and any headline
-metric whose cross-run coefficient of variation exceeds 5\% gets
-flagged. The sweep driver records the host environment---kernel,
+\textbf{Repetitions.} Every configuration runs fifteen times end to
+end, each in a fresh process, and the repetitions are
+\emph{interleaved} rather than blocked: repetition $k$ of every
+transport runs before repetition $k{+}1$ of any of them. That ordering
+is not cosmetic. The gate cost is a difference between two transports,
+so measuring all of one and then all of the other lets any drift across
+the sweep land directly in that difference; interleaving makes drift
+common-mode, so it cancels. We report the median run, and the
+cross-repetition coefficient of variation per column rather than as one
+aggregate, for the reason given in \Cref{sec:eval:rtt}. The sweep driver records the host environment---kernel,
 governor, isolation flags, SMT state, compiler---next to every CSV.
 
 \subsection{Q1: Per-message gate cost}
@@ -98,15 +104,25 @@ the gated--raw delta:
 \end{equation*}
 (RTT values as in \Cref{tab:rtt}: gated \gatedAstraRTT\,ns, raw
 \rawAstraRTT\,ns.)
-Cross-repetition stability for every headline cell appears in the
-artefact's CoV report. A number of cells on this machine do exceed
-5\%, which we read as the thermal and scheduling behaviour of a
-mobile-class part under sustained load (\Cref{sec:eval:hw}) rather
-than instability in the measured path. We ship that report rather
-than suppress it, so a reader can see exactly which cells moved and
-judge for themselves. The gate-cost distribution
-itself is tight, which is what you would expect from a validate body
-with no branches after the slot load.
+\textbf{On stability.} A single coefficient-of-variation count across
+all merged cells would be misleading, so we report it per column.
+Every \texttt{max} cell exceeds a 5\% threshold, which is arithmetic
+rather than a finding: a maximum is one sample per repetition and has
+no variance to average away. The p99.99 column behaves similarly for
+the same reason. In the two columns this paper actually quotes, p50 and
+p99, the overwhelming majority of cells fall inside 5\%. We give the
+breakdown rather than the total because the total invites a conclusion
+the data does not support, and the artefact ships the full per-cell
+report either way.
+
+The gate cost inherits the noise of both measurements it differences,
+so its per-repetition values span a wider relative range than either
+endpoint does. The artefact's run report gives a bootstrap confidence
+interval on the median. We quote the median in the text because the
+argument needs an order of magnitude rather than a decimal: every value
+in that interval sits far inside the 50\,ns design target, and the
+distribution is what a validate body with no branches after the slot
+load should produce.
 
 \textbf{Relative cost.} The gate adds \gateOverheadPercent\% to the
 round trip. We quote that fraction ourselves because it is the
