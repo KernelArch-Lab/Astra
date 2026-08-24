@@ -38,6 +38,7 @@ import csv
 import glob
 import json
 import os
+import platform
 import re
 import random
 import statistics
@@ -324,8 +325,56 @@ def main() -> int:
                             f"({inversions} inversions): suspect the harness")
     summary["checks"]["payload_inversions"] = mono
 
+    # -- MPSC oversubscription, the Q3 claim ----------------------------
+    #
+    # bench_throughput_mpsc does not pin, so its producers+1 threads run on
+    # whatever the general scheduler has left — which isolcpus deliberately
+    # shrinks. Oversubscribe that and the numbers measure thread thrashing,
+    # not the ring. On 2026-08-24 throughput fell by a factor of 769 between
+    # 2 and 4 producers, and the GATED arm "beat" raw at 8, which is
+    # impossible for a gate that only adds work. Q3's claim of linear
+    # scaling to a saturation point cannot be made from data like that.
+    print("\n[5] MPSC thread budget (paper's Q3 claim)")
+    schedCores = None
+    if platform.system() == "Linux":
+        try:
+            online = Path("/sys/devices/system/cpu/online").read_text().strip()
+            iso = Path("/sys/devices/system/cpu/isolated").read_text().strip()
+            def count(spec: str) -> int:
+                n = 0
+                for part in filter(None, spec.split(",")):
+                    if "-" in part:
+                        a, _, b = part.partition("-")
+                        n += int(b) - int(a) + 1
+                    else:
+                        n += 1
+                return n
+            schedCores = count(online) - (count(iso) if iso else 0)
+        except (OSError, ValueError):
+            schedCores = None
+    prods = sorted({int(v) for r in mpsc
+                    if (v := num(r, "producers")) is not None})
+    summary["checks"]["mpsc_producers"] = prods
+    summary["checks"]["scheduler_cores"] = schedCores
+    if schedCores and prods:
+        line("info", f"{schedCores} core(s) available to unpinned threads "
+                     f"(online minus isolated)")
+        bad = [p for p in prods if p + 1 > schedCores]
+        if bad:
+            line("FAIL", f"producer counts {bad} need {min(bad)+1}+ runnable "
+                         f"threads on {schedCores} core(s); those rows measure "
+                         f"scheduler contention, not the ring")
+            problems.append(
+                f"MPSC rows for {bad} producers oversubscribe a {schedCores}-core "
+                f"scheduler budget and are not publishable; Q3 cannot claim "
+                f"scaling behaviour from them")
+        else:
+            line("ok", f"every producer count fits the {schedCores}-core budget")
+    else:
+        line("info", "cannot determine the scheduler core budget here")
+
     # -- O(1) flatness, the Q2 claim ------------------------------------
-    print("\n[5] O(1) validate flatness (paper's Q2 claim)")
+    print("\n[6] O(1) validate flatness (paper's Q2 claim)")
     vals = [(num(r, "pool_active"), num(r, "p99_ns")) for r in pool]
     vals = [(a, b) for a, b in vals if a and b]
     if len(vals) >= 2:
@@ -350,7 +399,7 @@ def main() -> int:
         line("info", "pool scaling CSV absent or too small")
 
     # -- thesis gate -----------------------------------------------------
-    print("\n[6] Thesis gates")
+    print("\n[7] Thesis gates")
     if raw and gat:
         gate = (gat - raw) / 2.0
         ok = gate <= 50
@@ -381,7 +430,7 @@ def main() -> int:
                             "figure; the faithfulness argument in 6.2 needs rewording")
 
     # -- coverage --------------------------------------------------------
-    print("\n[7] Coverage")
+    print("\n[8] Coverage")
     for name, rows, why in (("figure_1", f1, "Table 1 + Figure 1"),
                             ("pool_scaling", pool, "Figure 2, validate macros"),
                             ("throughput_mpsc", mpsc, "Figure 3"),
@@ -396,7 +445,7 @@ def main() -> int:
         "revocation": len(rev), "perfcounters": len(perf)}
 
     # -- CoV, read back from the sweep's own report ----------------------
-    print("\n[8] Cross-repetition stability")
+    print("\n[9] Cross-repetition stability")
     cov = A / "paper1_cov_report.txt"
     if cov.exists():
         # Break the count down BY COLUMN. One threshold across every column

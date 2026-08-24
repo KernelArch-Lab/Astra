@@ -68,14 +68,15 @@ def percentileOfRevoke(rows: list[dict], pct: float) -> float:
 
 
 def main() -> int:
-    if len(sys.argv) != 4:
-        print("usage: gen_numbers_tex.py figure1.csv pool_scaling.csv revocation.csv",
-              file=sys.stderr)
+    if len(sys.argv) not in (4, 5):
+        print("usage: gen_numbers_tex.py figure1.csv pool_scaling.csv "
+              "revocation.csv [throughput_mpsc.csv]", file=sys.stderr)
         return 1
 
     f1   = loadCsv(Path(sys.argv[1]))
     pool = loadCsv(Path(sys.argv[2]))
     rev  = loadCsv(Path(sys.argv[3]))
+    mpsc = loadCsv(Path(sys.argv[4])) if len(sys.argv) == 5 else []
 
     # Reference numbers.
     rawA  = pickP99(f1, "astra_raw",   256)
@@ -129,6 +130,21 @@ def main() -> int:
     emit("gateOverheadTail", delta_p99, present=(rawA > 0 and gatA > 0))
     emit("gateOverheadPercent", gate_pct, ".0f", present=(rawA > 0 and gatA > 0))
     emit("aeronGapPercent",  aeron_gap, ".1f", present=(aer > 0 and gatA > 0))
+    # Single-producer MPSC gate cost. ONLY the one-producer point is
+    # reported: the harness does not pin, so any higher producer count
+    # oversubscribes a host whose scheduler cores isolcpus has reduced, and
+    # those rows measure thread contention rather than the ring (§6.3).
+    def mpscAt(state: str) -> float:
+        for r in mpsc:
+            try:
+                if int(r["producers"]) == 1 and r.get("gate_state") == state:
+                    return float(r["msgs_per_s"])
+            except (KeyError, ValueError):
+                continue
+        return 0.0
+    mOff, mOn = mpscAt("off"), mpscAt("on")
+    mpscPct = (mOff - mOn) / mOff * 100 if mOff > 0 else 0.0
+    emit("mpscGateCostPercent", mpscPct, ".1f", present=(mOff > 0 and mOn > 0))
     emit("revokeTail",       rev_p99_us, ".1f")
     return 0
 

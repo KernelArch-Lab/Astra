@@ -108,6 +108,7 @@ if [[ $PLOTS -eq 1 ]]; then
         ../../artefact/paper1_figure_1.csv \
         ../../artefact/paper1_pool_scaling.csv \
         ../../artefact/paper1_revocation.csv \
+        ../../artefact/paper1_throughput_mpsc.csv \
         > numbers/numbers.tex
 
     python3 ../../scripts/gen_table_perf.py \
@@ -234,10 +235,11 @@ if [[ $CHECK -eq 1 ]]; then
 
     # Which headline numbers are still placeholders? A macro is "filled"
     # when numbers/numbers.tex \renewcommand's it after a sweep.
-    # The 11 macros gen_numbers_tex.py emits — keep the two lists in sync.
+    # The 12 macros gen_numbers_tex.py emits — keep the two lists in sync.
     MACROS=(validateMedian validateTail validateFourNines
             rawAstraRTT gatedAstraRTT aeronRTT iouringRTT pipeRTT
-            gateOverheadTail aeronGapPercent revokeTail)
+            gateOverheadTail aeronGapPercent revokeTail
+            mpscGateCostPercent)
     MISSING=()
     for m in "${MACROS[@]}"; do
         grep -q "renewcommand{\\\\$m}" numbers/numbers.tex 2>/dev/null || MISSING+=("$m")

@@ -181,18 +181,34 @@ are live or 4090.
 \subsection{Q3: MPSC contention scaling}
 \label{sec:eval:mpsc}
 
-\Cref{fig:mpsc} plots aggregate throughput as the producer count
-sweeps 1, 2, 4, 8, 16 against one consumer. Both arms---gate off and
-gate on---scale roughly linearly until the lock-free CAS path
-saturates at \todoNum{N} producers, and the gated arm tracks the raw
-arm at a constant additive offset: the per-message validate cost,
-again.
+This is the one question this host cannot answer, and we would rather
+say so than fill the gap. The MPSC harness runs one thread per producer
+plus a consumer and does not pin, so those threads take whatever the
+general scheduler still owns---which \texttt{isolcpus} deliberately
+reduces to two cores here. Every producer count above one therefore
+oversubscribes, and the rows past that point describe thread contention
+rather than the ring. The signature is unmistakable: aggregate
+throughput falls by nearly three orders of magnitude between two and
+four producers, and at eight the gated arm appears to overtake the
+ungated one, which cannot happen for a gate that only adds work.
+
+The single unoversubscribed point is worth reporting. With one producer
+and one consumer, enabling the gate costs \mpscGateCostPercent\% of
+aggregate throughput---consistent with the per-message cost in
+\Cref{sec:eval:rtt}, and the only MPSC figure we defend. The scaling
+sweep needs a host with cores to spare; the harness ships with the
+artefact and runs there unmodified, and \Cref{sec:eval:threats} records
+the limitation.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/paper1_figure_3_mpsc}
-\caption{MPSC throughput scaling. Each producer holds its own derived
-send token; the consumer holds one recv token.}
+\caption{MPSC aggregate throughput vs producer count. Only the
+single-producer point is free of oversubscription on this host: beyond
+it the harness needs more runnable threads than the scheduler has cores
+left after \texttt{isolcpus}, and the cliff is that contention rather
+than any property of the ring. Included because the artefact reproduces
+it, not because we draw a scaling conclusion from it.}
 \label{fig:mpsc}
 \end{figure}
 
@@ -311,6 +327,15 @@ than the isolated measurements beside it. We flag this rather than
 bury it: it is a further reason to read Aeron's p99 on this platform
 as a property of the platform, and to lean only on the substrate
 argument of \Cref{sec:eval:rtt}.
+
+\para{MPSC scaling is unmeasured} The MPSC harness needs one runnable
+thread per producer plus a consumer, and it does not pin, so it competes
+for the cores \texttt{isolcpus} leaves to the general scheduler---two,
+on this machine. Only the single-producer configuration fits. We report
+that point and decline to draw a scaling curve from the rest, because
+those rows measure our own thread oversubscription. This is a property
+of the host, not of the design, and it is the one claim in the paper
+that a machine with spare cores would straightforwardly settle.
 
 \para{io\_uring configuration} Our io\_uring harness carries the
 payload over a pipe and issues one \texttt{IORING\_OP\_WRITE} or
