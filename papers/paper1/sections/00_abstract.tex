@@ -25,12 +25,13 @@ against, Aeron included. On top of that it provides
 Cornucopia\,Reloaded-class cascading revocation in software, with
 $O(1)$ time-to-effect regardless of pool occupancy. Revocation lands
 within \revokeTail\,$\mu$s of the \texttt{revoke()} call, end to end
-including drain; the gate survives MPSC contention with up to 16
-producers; and the implementation is checked against a hand-written
+including drain; enabling the gate costs \mpscGateCostPercent\% of
+single-producer MPSC throughput; and the implementation is checked
+against a hand-written
 property-based oracle and a CBMC bounded-model proof of permission
 monotonicity.
 
-Our evaluation runs pipe(2), socketpair, io\_uring, Aeron, and eRPC
+Our evaluation runs pipe(2), socketpair, io\_uring, and Aeron
 head-to-head, all in the same TSC domain on one machine. Source,
 baseline harnesses, and a one-command artefact-evaluation sweep
 accompany the paper.

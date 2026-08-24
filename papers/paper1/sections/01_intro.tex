@@ -43,9 +43,10 @@ throws away the latency the fastpath existed for. So the question
 this paper answers is not \emph{can we gate every message?}---of
 course we can---but \emph{can the gate ride the fastpath without
 giving up the floor that makes zero-copy IPC worth having?} We answer
-it by measurement: five reference transports---pipe(2), socketpair,
-io\_uring, Aeron, eRPC---run head-to-head in the same TSC domain on
-the same machine.
+it by measurement: four reference transports---pipe(2), socketpair,
+io\_uring, Aeron---run head-to-head in the same TSC domain on the same
+machine. An eRPC harness ships with the artefact too, but it needs a
+local eRPC build we do not assume, so we do not report it.
 
 \para{Why this is not obvious}
 Two design decisions are easy to get wrong. The natural
@@ -75,7 +76,7 @@ regime, gating a wait-free MPSC IPC fastpath in shared mmap memory
 without shrinking the $2^{96}$ forgery space
 (\Cref{sec:design:fastpath}).
 \item A reproducible same-TSC-domain comparison against pipe(2),
-socketpair, io\_uring, Aeron, and eRPC, with throughput, MPSC
+socketpair, io\_uring, and Aeron, with throughput, MPSC
 scaling, revocation-latency, and perf-counter measurements, all
 driven by one shell command (\Cref{sec:eval}).
 \item A property-based oracle test, a CBMC bounded-model proof of

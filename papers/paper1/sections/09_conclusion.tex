@@ -8,7 +8,8 @@ enough to matter. The slot-indexed validate path costs
 forgery space; the mediated round trip, at \gatedAstraRTT\,ns, stays
 faster than every transport we measured against; revocation takes
 effect within \revokeTail\,$\mu$s of the \texttt{revoke()} call; and
-the gate scales through MPSC contention. None of that required a
+the gate costs \mpscGateCostPercent\% of single-producer MPSC
+throughput. None of that required a
 kernel patch, a hypervisor, or capability hardware.
 
 We see this as one piece of a larger argument: that capability
