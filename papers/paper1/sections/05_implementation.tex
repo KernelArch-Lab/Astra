@@ -4,7 +4,7 @@
 \sysname is written in C++23 and built with \texttt{cmake}. The three
 subsystems this paper exercises---the capability manager (\Mone), the
 IPC ring (\Mthree), and the M-21 assembly primitives---come to about
-7,400 lines of source.
+8,000 lines of C++ and 335 lines of NASM.
 
 \subsection{Capability manager (\Mone)}
 \label{sec:impl:cap}
@@ -98,9 +98,10 @@ readers.
 \Mtwentyone ships seven routines hand-written in NASM against the
 System~V AMD64 ABI: \texttt{asm\_ct\_compare} (constant-time 16-byte
 compare), \texttt{asm\_secure\_wipe} (a memset the optimiser cannot
-delete), \texttt{asm\_rdrand64}, \texttt{asm\_lfence},
-\texttt{asm\_cache\_flush}, \texttt{asm\_spectre\_barrier}, and
-\texttt{asm\_stack\_guard}.
+delete), \texttt{asm\_ct\_select} (branchless conditional select),
+\texttt{asm\_rdrand64}, \texttt{asm\_lfence},
+\texttt{asm\_cache\_flush\_range}, and
+\texttt{asm\_stack\_canary\_init}.
 
 None of these are contributions---libsodium and BoringSSL ship
 equivalents---but the constant-time discipline matters because
@@ -113,7 +114,7 @@ which comparator implements it.
 
 We model \texttt{CapabilityManager}'s permission arithmetic in a
 small flat-C translation
-(\texttt{formal/cbmc/capability\_monotonicity.c}, 280 LOC) and prove
+(\texttt{formal/cbmc/capability\_monotonicity.c}, 296 LOC) and prove
 three properties with CBMC~\cite{cbmc}:
 
 \begin{description}
