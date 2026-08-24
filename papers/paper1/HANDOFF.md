@@ -32,31 +32,38 @@ i7-11370H (4C/8T, Tiger Lake), Fedora 43, kernel 7.0.10, gcc 15.2.1,
 `nosmt isolcpus=2,3 nohz_full=2,3 rcu_nocbs=2,3`, performance governor,
 5 repetitions median-merged.
 
-Latest complete run is 19:00 on 2026-08-16 — the first with Aeron. The
-18:24 column is the run before it, same machine, same commit for every
-non-Aeron path, and is kept here because the spread between the two is
-itself a finding.
+Latest complete run is 2026-08-24, **15 repetitions, interleaved**. The
+earlier 5-repetition columns are kept because the movement between them
+is itself the finding.
 
-| Metric | 19:00 (current) | 18:24 |
+| Metric | 15 reps (current) | 5 reps, blocked |
 |---|---|---|
-| Gate cost, p99 | **8 ns** (design target was ≤50) | 7 ns |
-| Gate as share of RTT | 23% | 20% |
-| Astra raw / gated, 256 B p99 | 66 / 81 ns | 67 / 80 ns |
-| Revocation time-to-effect, p99 | **0.3 µs** | 0.4 µs |
+| Gate cost, p99 | **7.3 ns** (target ≤50) | 7.6 ns (biased) |
+| Gate as share of RTT | 22% | 23% |
+| Paired vs unpaired estimator | **+0%** | +24% |
+| Astra raw / gated, 256 B p99 | 67 / 82 ns | 66 / 81 ns |
+| Revocation p99 | **0.3 µs** | 0.3 µs |
 | validate p50 / p99 / p99.99 | 21 / 22 / 27 ns | same |
-| pipe / io_uring, 256 B p99 | 5,473 / 6,569 ns | 5,535 / 6,324 ns |
-| Aeron, 256 B p99 | **1,447 ns** (gap −94.4%) | timed out |
-| ctest / CBMC | 21/21 pass, 0 of 37 failed | same |
-| Cells over 5% CoV | 101 | 80 |
+| pipe / io_uring, 256 B p99 | 5,688 / 6,953 ns | 5,473 / 6,569 |
+| Aeron, 256 B p99 | 669 ns (gap −87.8%) | 1,447 ns |
+| CoV in p50/p99 (quoted) | **6 of 74** | 12 of 74 |
+| CoV in max_ns | 30 of 30 | 28 of 30 |
+| Payload inversions | **0** | 2 |
+| ctest / CBMC | 21/21, 0 of 37 failed | same |
 
-**The headline number is not stable to the digit we quote it at.** Gate
-cost is derived as (gated − raw)/2, so the raw−gated delta moved 13 → 15
-ns between two runs an hour apart, and the quoted integer moved 7 → 8 ns
-(23% vs 20% of RTT). Both clear the ≤50 ns thesis gate with enormous
-margin, so no claim is at risk — but quoting a bare integer implies a
-precision five repetitions on this machine do not support. Decide before
-submission whether to quote a range, add cross-run spread to
-`gen_numbers_tex.py`, or state the uncertainty in §6.2.
+**What the sequence of runs established.** The 7.6 ns in earlier drafts
+was biased 24% low by block ordering. Interleaving fixed the estimator.
+The 9.4 ns from the first interleaved run was itself n=5 sampling noise.
+At n=15 the paired and unpaired estimators agree exactly, so **7.3 ns is
+the first trustworthy value**. Quote it with the bootstrap CI from
+`run_summary.json`, not as a bare integer: the CI straddles a rounding
+boundary and always will at this spread.
+
+**The CoV panic was largely an artifact.** Aggregating one 5% threshold
+over columns with different natures produced "100 of 294". Broken down,
+`max_ns` is 30 of 30 — a maximum is one sample per repetition and cannot
+meet a variance bar by construction — while p50 and p99 are 6 of 74.
+§6.2 now reports the breakdown instead of apologising for the total.
 
 ## What is left
 
