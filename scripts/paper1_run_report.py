@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime
 import glob
 import json
 import os
@@ -167,6 +168,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--artefact", type=Path, default=Path("artefact"))
     ap.add_argument("--json", type=Path, default=None)
+    ap.add_argument("--history", action="store_true",
+                    help="print the trend across past runs and exit")
     ap.add_argument("--drift-warn", type=float, default=3.0,
                     help="percent robust trend between first and second half of reps")
     ap.add_argument("--tail-warn", type=float, default=100.0,
@@ -176,6 +179,41 @@ def main() -> int:
     args = ap.parse_args()
 
     A = args.artefact
+    histPath = A / "run_history.jsonl"
+
+    # --history: a single run tells you its own quality; a series tells you
+    # whether a change helped. Cheap to keep, and the alternative is
+    # remembering numbers across days, which is how the 24% ordering bias
+    # survived as long as it did.
+    if args.history:
+        if not histPath.exists():
+            print(f"no history at {histPath}")
+            return 0
+        recs = []
+        for ln in histPath.read_text().splitlines():
+            try:
+                recs.append(json.loads(ln))
+            except ValueError:
+                continue
+        if not recs:
+            print("history is empty")
+            return 0
+        print(f"{'when':<20}{'reps':>5}{'gate ns':>9}{'CI':>14}"
+              f"{'p50/p99 CoV':>13}{'problems':>10}")
+        print("-" * 71)
+        # Every field can legitimately be absent OR explicitly null (a run
+        # with too few repetitions records reps=None), so .get defaults are
+        # not enough — coerce through a formatter that handles both.
+        def cell(v) -> str:
+            return "-" if v is None else str(v)
+        for r in recs:
+            ci = r.get("gate_ci") or []
+            ciTxt = f"{ci[0]}-{ci[1]}" if len(ci) == 2 else "-"
+            cov = f"{cell(r.get('cov_quoted_over'))}/{cell(r.get('cov_quoted_total'))}"
+            print(f"{cell(r.get('ts'))[:19]:<20}{cell(r.get('reps')):>5}"
+                  f"{cell(r.get('gate_ns')):>9}{ciTxt:>14}"
+                  f"{cov:>13}{cell(r.get('problems')):>10}")
+        return 0
     f1   = loadCsv(A / "paper1_figure_1.csv")
     pool = loadCsv(A / "paper1_pool_scaling.csv")
     rev  = loadCsv(A / "paper1_revocation.csv")
@@ -510,6 +548,32 @@ def main() -> int:
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(json.dumps(summary, indent=2) + "\n")
         print(f"\nmachine-readable summary -> {args.json}")
+
+    # Append one line per run. Never fails the report: losing a history
+    # entry must not cost you the run you just spent an hour on.
+    try:
+        h = summary.get("headline", {})
+        c = summary.get("checks", {})
+        rec = {
+            "ts": datetime.datetime.now().isoformat(timespec="seconds"),
+            "reps": len(h.get("gate_per_rep") or []) or None,
+            "gate_ns": h.get("gate_ns"),
+            "gate_ci": h.get("gate_ci95_ns"),
+            "raw_p99": h.get("raw_p99"),
+            "gated_p99": h.get("gated_p99"),
+            "paired_skew_pct": h.get("paired_vs_unpaired_pct"),
+            "cov_over": c.get("cov_over"),
+            "cov_quoted_over": c.get("cov_quoted_over"),
+            "cov_quoted_total": c.get("cov_quoted_total"),
+            "problems": len(summary.get("problems", [])),
+        }
+        histPath.parent.mkdir(parents=True, exist_ok=True)
+        with histPath.open("a") as f:
+            f.write(json.dumps(rec) + "\n")
+        print(f"appended to {histPath}  "
+              f"(trend: paper1_run_report.py --history --artefact {A})")
+    except OSError as exc:
+        print(f"note: could not append history ({exc})")
 
     return 0
 

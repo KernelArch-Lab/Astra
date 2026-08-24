@@ -117,12 +117,13 @@ report either way.
 
 The gate cost inherits the noise of both measurements it differences,
 so its per-repetition values span a wider relative range than either
-endpoint does. The artefact's run report gives a bootstrap confidence
-interval on the median. We quote the median in the text because the
-argument needs an order of magnitude rather than a decimal: every value
-in that interval sits far inside the 50\,ns design target, and the
-distribution is what a validate body with no branches after the slot
-load should produce.
+endpoint does. Bootstrapping the median across the repetitions puts its
+95\% confidence interval at \gateCostCILo--\gateCostCIHi\,ns. We give
+the interval rather than the point estimate alone because it straddles a
+rounding boundary, and a bare integer would imply a precision the data
+does not support. What the data does support is the claim that matters:
+every value in that interval sits two orders of magnitude inside the
+50\,ns design target.
 
 \textbf{Relative cost.} The gate adds \gateOverheadPercent\% to the
 round trip. We quote that fraction ourselves because it is the

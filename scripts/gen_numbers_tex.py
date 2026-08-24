@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import sys
 from pathlib import Path
 
@@ -68,15 +69,34 @@ def percentileOfRevoke(rows: list[dict], pct: float) -> float:
 
 
 def main() -> int:
-    if len(sys.argv) not in (4, 5):
+    # Args are identified by extension rather than position: CSVs in the
+    # documented order, plus an optional run_summary.json from
+    # paper1_run_report.py. That avoids a positional convention that grows
+    # ambiguous every time an input is added.
+    args = sys.argv[1:]
+    jsons = [a for a in args if a.endswith(".json")]
+    csvs = [a for a in args if not a.endswith(".json")]
+    if len(csvs) not in (3, 4):
         print("usage: gen_numbers_tex.py figure1.csv pool_scaling.csv "
-              "revocation.csv [throughput_mpsc.csv]", file=sys.stderr)
+              "revocation.csv [throughput_mpsc.csv] [run_summary.json]",
+              file=sys.stderr)
         return 1
 
-    f1   = loadCsv(Path(sys.argv[1]))
-    pool = loadCsv(Path(sys.argv[2]))
-    rev  = loadCsv(Path(sys.argv[3]))
-    mpsc = loadCsv(Path(sys.argv[4])) if len(sys.argv) == 5 else []
+    f1   = loadCsv(Path(csvs[0]))
+    pool = loadCsv(Path(csvs[1]))
+    rev  = loadCsv(Path(csvs[2]))
+    mpsc = loadCsv(Path(csvs[3])) if len(csvs) == 4 else []
+
+    # The gate cost is a difference between two noisy quantities, so the
+    # paper should quote its interval, not just the point. run_report
+    # already bootstraps that CI; read it rather than recompute it.
+    summary: dict = {}
+    if jsons:
+        try:
+            summary = json.loads(Path(jsons[0]).read_text())
+        except (OSError, ValueError):
+            summary = {}
+    ci = (summary.get("headline") or {}).get("gate_ci95_ns") or []
 
     # Reference numbers.
     rawA  = pickP99(f1, "astra_raw",   256)
@@ -144,6 +164,12 @@ def main() -> int:
         return 0.0
     mOff, mOn = mpscAt("off"), mpscAt("on")
     mpscPct = (mOff - mOn) / mOff * 100 if mOff > 0 else 0.0
+    if len(ci) == 2:
+        print(rf"\renewcommand{{\gateCostCILo}}{{{ci[0]:.1f}}}")
+        print(rf"\renewcommand{{\gateCostCIHi}}{{{ci[1]:.1f}}}")
+    else:
+        print(r"% \gateCostCILo/\gateCostCIHi: no run_summary.json — "
+              r"keeping red placeholders")
     emit("mpscGateCostPercent", mpscPct, ".1f", present=(mOff > 0 and mOn > 0))
     emit("revokeTail",       rev_p99_us, ".1f")
     return 0

@@ -109,6 +109,7 @@ if [[ $PLOTS -eq 1 ]]; then
         ../../artefact/paper1_pool_scaling.csv \
         ../../artefact/paper1_revocation.csv \
         ../../artefact/paper1_throughput_mpsc.csv \
+        ../../artefact/run_summary.json \
         > numbers/numbers.tex
 
     python3 ../../scripts/gen_table_perf.py \
