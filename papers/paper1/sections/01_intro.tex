@@ -28,7 +28,13 @@ separation. CAP-VMs~\cite{capvms} pairs capabilities with fast IPC in
 userspace, but only on CHERI/Morello hardware. The corner that stays
 empty---the one the agent-runtime workload keeps pushing toward---is
 \textit{userspace, capability-mediated, stock Linux, ordinary
-hardware}.
+hardware}. HongMeng~\cite{hongmeng} comes nearest from the kernel
+side, and its authors report walking \emph{back} from chain-revocable
+capabilities to plain address tokens because revocation cost hurt
+their common case. We read that as a result about their point in the
+design space rather than about revocation in general, and it is the
+comparison this paper is most interested in
+(\Cref{sec:disc:hongmeng}).
 
 \sysnamefull is our attempt to occupy that corner. It is a C++
 runtime that gates every zero-copy memfd IPC channel through
@@ -76,9 +82,9 @@ regime, gating a wait-free MPSC IPC fastpath in shared mmap memory
 without shrinking the $2^{96}$ forgery space
 (\Cref{sec:design:fastpath}).
 \item A reproducible same-TSC-domain comparison against pipe(2),
-socketpair, io\_uring, and Aeron, with throughput, MPSC
-scaling, revocation-latency, and perf-counter measurements, all
-driven by one shell command (\Cref{sec:eval}).
+socketpair, io\_uring, and Aeron, with throughput,
+revocation-latency, and perf-counter measurements, all driven by one
+shell command (\Cref{sec:eval}).
 \item A property-based oracle test, a CBMC bounded-model proof of
 permission monotonicity, and an MPSC-contention revocation test that
 together back every numerical claim we make
@@ -92,9 +98,11 @@ trip of \rawAstraRTT\,ns---a large fraction of a very small
 number---and the mediated path that results, at
 \gatedAstraRTT\,ns, is still faster than every transport in our
 comparison set. Mediation, in other words, does not cost you the
-fastpath. The validate itself runs in \validateTail\,ns at p99
-\textit{regardless of pool occupancy} (\Cref{fig:figure-2}), which is
-the $O(1)$ claim made concrete.
+fastpath. And validate is flat \textit{regardless of pool occupancy}
+(\Cref{fig:figure-2}), which is the $O(1)$ claim made concrete---the
+shape rather than the floor, since a call this short is measured close
+to the resolution of the timing instrumentation
+(\Cref{sec:eval:hw}).
 
 \para{What we do not claim}
 $O(1)$ revocation is not our algorithm. Redell~\cite{redell74} and

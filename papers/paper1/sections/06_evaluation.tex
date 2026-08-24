@@ -323,10 +323,14 @@ need CPU while two of them busy-spin, and two isolated cores with
 \texttt{nohz\_full}---whose whole purpose is to stop the timer tick
 there---leave no preemption to let the third run. The harness wedges.
 Aeron therefore runs across all CPUs, which gives it a noisier tail
-than the isolated measurements beside it. We flag this rather than
-bury it: it is a further reason to read Aeron's p99 on this platform
-as a property of the platform, and to lean only on the substrate
-argument of \Cref{sec:eval:rtt}.
+than the isolated measurements beside it. Its cross-repetition
+behaviour shows the same thing: over fifteen repetitions its p99 at
+256\,B moved by roughly a third between the best and worst run, a
+spread no isolated harness came close to. We flag both rather than
+bury them, because together they are the reason to read Aeron's tail
+\emph{and} its run-to-run variation on this platform as properties of
+the configuration we were forced into, and to lean only on the
+substrate argument of \Cref{sec:eval:rtt}.
 
 \para{MPSC scaling is unmeasured} The MPSC harness needs one runnable
 thread per producer plus a consumer, and it does not pin, so it competes
