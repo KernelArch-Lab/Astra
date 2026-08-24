@@ -76,7 +76,7 @@ def main() -> int:
     args = sys.argv[1:]
     jsons = [a for a in args if a.endswith(".json")]
     csvs = [a for a in args if not a.endswith(".json")]
-    if len(csvs) not in (3, 4):
+    if len(csvs) not in (3, 4, 5):
         print("usage: gen_numbers_tex.py figure1.csv pool_scaling.csv "
               "revocation.csv [throughput_mpsc.csv] [run_summary.json]",
               file=sys.stderr)
@@ -85,7 +85,8 @@ def main() -> int:
     f1   = loadCsv(Path(csvs[0]))
     pool = loadCsv(Path(csvs[1]))
     rev  = loadCsv(Path(csvs[2]))
-    mpsc = loadCsv(Path(csvs[3])) if len(csvs) == 4 else []
+    mpsc = loadCsv(Path(csvs[3])) if len(csvs) >= 4 else []
+    floor = loadCsv(Path(csvs[4])) if len(csvs) == 5 else []
 
     # The gate cost is a difference between two noisy quantities, so the
     # paper should quote its interval, not just the point. run_report
@@ -170,6 +171,14 @@ def main() -> int:
     else:
         print(r"% \gateCostCILo/\gateCostCIHi: no run_summary.json — "
               r"keeping red placeholders")
+    floorNs = 0.0
+    for r in floor:
+        if r.get("metric") == "timer_floor":
+            try:
+                floorNs = float(r["p50_ns"])
+            except (KeyError, ValueError):
+                pass
+    emit("timerFloor", floorNs, ".1f")
     emit("mpscGateCostPercent", mpscPct, ".1f", present=(mOff > 0 and mOn > 0))
     emit("revokeTail",       rev_p99_us, ".1f")
     return 0

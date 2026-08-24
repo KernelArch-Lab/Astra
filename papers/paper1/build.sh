@@ -109,6 +109,7 @@ if [[ $PLOTS -eq 1 ]]; then
         ../../artefact/paper1_pool_scaling.csv \
         ../../artefact/paper1_revocation.csv \
         ../../artefact/paper1_throughput_mpsc.csv \
+        ../../artefact/paper1_timer_floor.csv \
         ../../artefact/run_summary.json \
         > numbers/numbers.tex
 
@@ -240,7 +241,7 @@ if [[ $CHECK -eq 1 ]]; then
     MACROS=(validateMedian validateTail validateFourNines
             rawAstraRTT gatedAstraRTT aeronRTT iouringRTT pipeRTT
             gateOverheadTail aeronGapPercent revokeTail
-            mpscGateCostPercent)
+            mpscGateCostPercent timerFloor)
     MISSING=()
     for m in "${MACROS[@]}"; do
         grep -q "renewcommand{\\\\$m}" numbers/numbers.tex 2>/dev/null || MISSING+=("$m")

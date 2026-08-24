@@ -309,6 +309,12 @@ merge_metric bench_throughput_mpsc    "$ART_DIR/paper1_throughput_mpsc.csv" medi
 merge_metric bench_revocation_latency "$ART_DIR/paper1_revocation.csv"      concat -
 merge_metric bench_perfcounters       "$ART_DIR/paper1_perfcounters.csv"    median metric,pool_active
 merge_metric bench_pool_scaling       "$ART_DIR/paper1_pool_scaling.csv"    median metric,pool_active
+# The instrument's own cost. Every latency above is sampled through an
+# rdtscp+lfence bracket; this measures an empty bracket so the additive
+# constant is published rather than left implicit. It cancels in the gate
+# cost (a difference) but inflates every absolute figure, most for the
+# fastest transports.
+merge_metric bench_timer_floor        "$ART_DIR/paper1_timer_floor.csv"     median metric
 
 # --- 5. Summary -------------------------------------------------------------
 echo

@@ -32,6 +32,15 @@ C++23 on gcc 15.2.1 at \texttt{-O3 -march=native}. Time comes from
 \texttt{rdtscp + lfence}, calibrated against \texttt{steady\_clock}
 over a 50\,ms window.
 
+Both of those instructions serialise, so the bracket is not free, and we
+measure its cost rather than assume it away: an empty
+\texttt{now()}-to-\texttt{now()} pair takes \timerFloor\,ns on this
+host. Every absolute latency below carries that as an additive constant,
+and we publish it so a reader can subtract it. It cancels in the gate
+cost, which is a difference between two equally bracketed measurements,
+but it does not cancel in the absolutes---and because it is a constant,
+it inflates the fastest transports proportionally most.
+
 We note the platform explicitly because it shapes what these numbers
 can support. This is a mobile-class part, not a server: absolute
 latencies would differ on server silicon, and sustained load invites
@@ -315,7 +324,10 @@ line, is folded into the delta rather than isolated.
 \texttt{steady\_clock} over a 50\,ms window bounds calibration error
 well under 1\%, and the \texttt{rdtscp+lfence} serialisation cost is
 identical in every transport's measurement loop, so it cancels in
-comparisons.
+comparisons. It does not cancel in absolute figures, which is why we
+measure it (\timerFloor\,ns, \Cref{sec:eval:hw}) instead of only
+asserting that it cancels. A per-call figure of the same order as the
+instrument should be read as an upper bound, not a floor.
 
 \para{Aeron runs without core isolation} Every other harness pins its
 threads to the isolated cores; Aeron cannot. Its client adds a

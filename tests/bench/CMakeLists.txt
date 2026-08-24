@@ -33,6 +33,7 @@ add_executable(bench_throughput_mpsc     bench_throughput_mpsc.cpp)
 add_executable(bench_revocation_latency  bench_revocation_latency.cpp)
 add_executable(bench_perfcounters        bench_perfcounters.cpp)
 add_executable(bench_pool_scaling        bench_pool_scaling.cpp)
+add_executable(bench_timer_floor         bench_timer_floor.cpp)
 
 foreach(_bench
         bench_baseline_pipe
@@ -46,7 +47,8 @@ foreach(_bench
         bench_throughput_mpsc
         bench_revocation_latency
         bench_perfcounters
-        bench_pool_scaling)
+        bench_pool_scaling
+        bench_timer_floor)
     target_include_directories(${_bench}
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR})
@@ -153,6 +155,7 @@ add_custom_target(paper1_baselines DEPENDS
     bench_throughput_mpsc
     bench_revocation_latency
     bench_perfcounters
-    bench_pool_scaling)
+    bench_pool_scaling
+    bench_timer_floor)
 
 message(STATUS "[Paper-1] tests/bench targets configured (build with --target paper1_baselines)")
