@@ -237,21 +237,39 @@ if [[ $CHECK -eq 1 ]]; then
 
     # Which headline numbers are still placeholders? A macro is "filled"
     # when numbers/numbers.tex \renewcommand's it after a sweep.
-    # The 12 macros gen_numbers_tex.py emits — keep the two lists in sync.
-    MACROS=(validateMedian validateTail validateFourNines
-            rawAstraRTT gatedAstraRTT aeronRTT iouringRTT pipeRTT
-            gateOverheadTail aeronGapPercent revokeTail
-            mpscGateCostPercent timerFloor timerFloorTail)
-    MISSING=()
-    for m in "${MACROS[@]}"; do
-        grep -q "renewcommand{\\\\$m}" numbers/numbers.tex 2>/dev/null || MISSING+=("$m")
-    done
-    if [[ ${#MISSING[@]} -eq 0 ]]; then
-        echo "  OK   all headline numbers filled by numbers/numbers.tex"
-    else
-        echo "  TODO ${#MISSING[@]} headline numbers still red placeholders:"
-        printf '         %s\n' "${MISSING[@]}"
-    fi
+    # Which red-default macros still render red? DERIVED, not listed.
+    #
+    # This used to be a hand-maintained array kept "in sync" with
+    # gen_numbers_tex.py, and it drifted: gateOverheadPercent appears in the
+    # abstract and §6.2 and was never in the list, so the checklist could
+    # report "all headline numbers filled" while it printed red. Meanwhile it
+    # tracked nine macros the text does not use. The set that matters is
+    # exactly "defaults to \todoNum AND appears in a section", so compute it.
+    python3 - <<'PYCHK'
+import pathlib, re, sys
+mac  = pathlib.Path("macros.tex").read_text()
+nums = pathlib.Path("numbers/numbers.tex").read_text() if pathlib.Path("numbers/numbers.tex").exists() else ""
+body = "".join(p.read_text() for p in sorted(pathlib.Path("sections").glob("*.tex")))
+
+red   = set(re.findall(r"\\newcommand\{\\(\w+)\}\s*\{\\todoNum", mac))
+used  = {m for m in red if re.search(r"\\" + m + r"(?![A-Za-z])", body)}
+filled = set(re.findall(r"renewcommand\{\\(\w+)\}", nums))
+missing = sorted(used - filled)
+
+# Inline \todoNum{...} uses are invisible to a macro check, so count them too:
+# a red marker in the PDF is a red marker whether or not a macro produced it.
+inline = len(re.findall(r"\\todoNum\{", body))
+
+if not missing and not inline:
+    print("  OK   every macro the text uses is filled, and no inline markers")
+else:
+    if missing:
+        print(f"  TODO {len(missing)} macro(s) used in the text still red:")
+        for m in missing:
+            print(f"         {m}")
+    if inline:
+        print(f"  TODO {inline} inline \\todoNum marker(s) in the sections")
+PYCHK
 
     echo
     if [[ $FAIL -eq 0 ]]; then echo "==> Checklist: no hard failures."
