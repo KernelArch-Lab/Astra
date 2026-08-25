@@ -119,7 +119,12 @@ Every \texttt{max} cell exceeds a 5\% threshold, which is arithmetic
 rather than a finding: a maximum is one sample per repetition and has
 no variance to average away. The p99.99 column behaves similarly for
 the same reason. In the two columns this paper actually quotes, p50 and
-p99, the overwhelming majority of cells fall inside 5\%. We give the
+p99, the overwhelming majority of cells fall inside 5\%. The tail
+columns have a second problem besides being near-single samples: the
+timing instrument's own p99.99 is \timerFloorTail\,ns, which is larger
+than the entire median round trip of our fastest transports. Their
+p99.99 figures therefore describe the instrument at least as much as the
+transport, and we draw no conclusions from them. We give the
 breakdown rather than the total because the total invites a conclusion
 the data does not support, and the artefact ships the full per-cell
 report either way.
@@ -135,12 +140,21 @@ every value in that interval sits two orders of magnitude inside the
 50\,ns design target.
 
 \textbf{Relative cost.} The gate adds \gateOverheadPercent\% to the
-round trip. We quote that fraction ourselves because it is the
-number a sceptical reader will compute, and because the honest
-reading of it is favourable: a large percentage of \rawAstraRTT\,ns
-is still a small number of nanoseconds, and the mediated path at
+round trip as measured. We quote that fraction ourselves because it is
+the number a sceptical reader will compute, and because the honest
+reading of it is favourable: a large percentage of \rawAstraRTT\,ns is
+still a small number of nanoseconds, and the mediated path at
 \gatedAstraRTT\,ns remains faster than every transport in
 \Cref{tab:rtt}.
+
+The fraction is also conservative. Both round trips carry the
+\timerFloor\,ns instrument constant, and subtracting it from each
+shrinks the denominator while leaving the difference untouched, so the
+gate's true share of an uninstrumented round trip is somewhat higher
+than what we print. We report the measured ratio anyway, because it is
+what a reader can derive from \Cref{tab:rtt} without trusting our
+arithmetic, and we would rather a correction move against us than for
+us.
 
 \textbf{On the Aeron comparison.} Aeron is in the table as a sanity
 check on our substrate, not as a scalp. Its purpose is to establish

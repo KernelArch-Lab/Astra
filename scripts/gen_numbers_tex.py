@@ -171,14 +171,16 @@ def main() -> int:
     else:
         print(r"% \gateCostCILo/\gateCostCIHi: no run_summary.json — "
               r"keeping red placeholders")
-    floorNs = 0.0
+    floorNs = floorTail = 0.0
     for r in floor:
         if r.get("metric") == "timer_floor":
             try:
                 floorNs = float(r["p50_ns"])
+                floorTail = float(r["p9999_ns"])
             except (KeyError, ValueError):
                 pass
     emit("timerFloor", floorNs, ".1f")
+    emit("timerFloorTail", floorTail, ".0f")
     emit("mpscGateCostPercent", mpscPct, ".1f", present=(mOff > 0 and mOn > 0))
     emit("revokeTail",       rev_p99_us, ".1f")
     return 0

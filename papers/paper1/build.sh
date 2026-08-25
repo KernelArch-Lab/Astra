@@ -241,7 +241,7 @@ if [[ $CHECK -eq 1 ]]; then
     MACROS=(validateMedian validateTail validateFourNines
             rawAstraRTT gatedAstraRTT aeronRTT iouringRTT pipeRTT
             gateOverheadTail aeronGapPercent revokeTail
-            mpscGateCostPercent timerFloor)
+            mpscGateCostPercent timerFloor timerFloorTail)
     MISSING=()
     for m in "${MACROS[@]}"; do
         grep -q "renewcommand{\\\\$m}" numbers/numbers.tex 2>/dev/null || MISSING+=("$m")
